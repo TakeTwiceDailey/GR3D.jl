@@ -10,13 +10,13 @@ using Plots, Printf, Statistics, BenchmarkTools, ForwardDiff
 
 using Tensorial, InteractiveUtils
 
-using RootSolvers # Roots (Roots.jl does not work on GPU)
+using RootSolvers # (Roots.jl does not work on GPU)
 
 using Profile
 
 ParallelStencil.@reset_parallel_stencil()
 
-const USE_GPU = true  # Use GPU? If this is set false, then no GPU needs to be available
+const USE_GPU = false  # Use GPU? If this is set false, then no GPU needs to be available
 
 @static if USE_GPU
     @define_CuCellArray() # without this CuCellArrays don't work
@@ -37,17 +37,23 @@ const FourTensor = SecondOrderTensor{4,Data.Number,16}
 # Alias for symmetric 4 tensor
 const StateTensor = SymmetricSecondOrderTensor{4,Data.Number,10}
 
+# Alias for symmetric 4th rank tensor
+const Projection = SymmetricFourthOrderTensor{4,Data.Number}
+
+# Alias for non-symmetric 4th rank tensor
+const NSProjection = FourthOrderTensor{4,Data.Number}
+
 # Alias for tensor to hold metric derivatives and Christoffel Symbols
 # Defined to be symmetric in the last two indices
 const Symmetric3rdOrderTensor = Tensor{Tuple{4,@Symmetry{4,4}},Data.Number,3,40}
 
 # Struct for main memory and Runge-Kutta algorithms that holds all state vector variables
 struct StateVector <: FieldVector{5,StateTensor}
-    g::StateTensor
-    dx::StateTensor
-    dy::StateTensor
-    dz::StateTensor
-    P::StateTensor
+    g::StateTensor  # metric tensor
+    dx::StateTensor # x-derivative
+    dy::StateTensor # y-derivative
+    dz::StateTensor # z-derivative
+    P::StateTensor  # normal projection derivative
 end
 
 math_operators = [:+,:-,:*]
@@ -95,6 +101,9 @@ end
 const Zero   = zero(StateTensor)
 const ZeroST = zero(StateVector)
 const MinST = StateVector(StateTensor((-1,0,0,0,1,0,0,1,0,1)),Zero,Zero,Zero,Zero)
+
+# Defintions of coefficents for embedded boundary finite differencing operators
+# All of this can be found here: https://doi.org/10.1016/j.jcp.2016.12.034
 
 ##################################################################
 # Coefficent functions for fourth order diagonal norm 
@@ -437,7 +446,7 @@ end
 
 Base.@propagate_inbounds @inline function Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,i,j,k) # Calculate the divergence of the flux
     dx,dy,dz,_ = ds
-    (Dx(vx,U,ns,nls,nrs,αls,αrs,i,j,k)/dx + Dy(vy,U,ns,nls,nrs,αls,αrs,i,j,k)/dy + Dz(vz,U,ns,nls,nrs,αls,αrs,i,j,k)/dz)/rootγ(U)
+    (Dx(vx,U,ns,nls,nrs,αls,αrs,i,j,k)/dx + Dy(vy,U,ns,nls,nrs,αls,αrs,i,j,k)/dy + Dz(vz,U,ns,nls,nrs,αls,αrs,i,j,k)/dz)/rootγ(U[i,j,k])
 end
 
 @inline function vectors(U,i,l)
@@ -479,9 +488,7 @@ end
     ℓ = (n + s)/sqrt(2)
     k = (n - s)/sqrt(2)
 
-    δ = one(StateTensor)
-
-    σ = FourTensor((μ,ν) -> δ[μ,ν] + k[μ]*ℓ[ν] + ℓ[μ]*k[ν])
+    σ = StateTensor((μ,ν) -> gi[μ,ν] + k[μ]*ℓ[ν] + ℓ[μ]*k[ν]) # all indices up
 
     return (k,ℓ,σ)
 end
@@ -618,6 +625,9 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
         if (ri[i]==nl==1) || (nl ≠ 1 && ri[i] in nl:nl+1) # in the boundary region on the left side of the line
 
             let 
+            # I want to use the same variable names here in the left branch 
+            # as in the right branch, so there is a let block to allow this
+            # and prevent type instability
                 
                 αl = αls[i]
 
@@ -662,7 +672,7 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
                 ∂gb = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(Zero)))
 
                 Upb = @einsum  k[α]*∂gb[α,μ,ν]
-                U0b = @einsum  σ[α,β]*∂gb[β,μ,ν]
+                U0b = @einsum  σm[α,β]*∂gb[β,μ,ν]
 
                 s_ = (ℓ_ - k_)/sqrt(2)
 
@@ -723,6 +733,9 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
         if (ri[i]==nr==ns[i]) || (nr ≠ ns[i] && ri[i] in (nr-1):nr) # in the boundary region on the right side of the line
 
             let
+            # I want to use the same variable names here in the right branch 
+            # as in the left branch before, so there is a let block to allow this
+            # and prevent type instability
 
                 αr = αrs[i]
 
@@ -751,6 +764,9 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
         
                 ℓ_ = @einsum g[μ,α]*ℓ[α]
                 k_ = @einsum g[μ,α]*k[α]
+
+                σm = @einsum g[μ,α]*σ[α,ν]  # mixed indices down up
+                σ_ = @einsum g[μ,α]*σm[ν,α] # all indices down
         
                 gi = inv(g)
         
@@ -765,7 +781,7 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
                 ∂gb = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(Zero)))
         
                 Upb = @einsum k[α]*∂gb[α,μ,ν]
-                U0b = @einsum σ[α,β]*∂gb[β,μ,ν] # Symmetric3rdOrderTensor
+                U0b = @einsum σm[α,β]*∂gb[β,μ,ν] # Symmetric3rdOrderTensor
         
                 s_ = (ℓ_ - k_)/sqrt(2)
 
@@ -779,8 +795,32 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
                 cm    = -α - βs
                 cperp = -βs
 
-                UmBC = (cp/cm)*Upb + (sqrt(2)/cm)*βU0
-        
+                UmBC1 = (cp/cm)*Upb + (sqrt(2)/cm)*βU0
+
+                Amp = 1.
+                #Amp = 0.0
+                σ0 = 10
+                μ0 = 110
+
+                f(t,x,y,z) = (μ0-t-σ0)<x<(μ0-t+σ0) ? Amp : 0.
+
+                if c2
+                    CBC = f(t,x,y,z)*(ones(FourVector))
+                else
+                    CBC = zeros(FourVector)
+                end
+
+                # Three index constraint projector (indices up down down)
+                Q3 = Symmetric3rdOrderTensor((α,μ,ν) -> 0.5*(ℓ_[μ]*σm[ν,α] + ℓ_[ν]*σm[μ,α] - σ_[μ,ν]*ℓ[α] - ℓ_[μ]*ℓ_[ν]*k[α])) 
+
+                # Gravitational wave projector (indices down down up up)
+                O = Projection((μ,ν,α,β) -> σm[μ,α]*σm[ν,β] - 0.5*σ_[μ,ν]*σ[α,β]) 
+
+                # index down
+                A_ = @einsum (2*ℓ[μ]*Upb[μ,α] - gi[μ,ν]*Upb[μ,ν]*ℓ_[α] - 2gi[μ,ν]*U0b[μ,ν,α] + gi[μ,ν]*U0b[α,μ,ν] + 2*Hxy[α] + 2*CBC[α])
+
+                G = minorsymmetric(NSProjection((μ,ν,α,β) -> (2k_[μ]*ℓ_[ν]*k[α]*ℓ[β] - 2k_[μ]*σm[ν,α]*ℓ[β] + k_[μ]*k_[ν]*ℓ[α]*ℓ[β])))
+
                 # if outer
                 #     UmBC = -Upb
                 # else
@@ -909,29 +949,67 @@ end
         βy = -gi[1,3]/gi[1,1]
         βz = -gi[1,4]/gi[1,1]
 
-        ########################################################
-        # Constraints and constraint damping
+        n  = FourVector((1.0/α,-βx/α,-βy/α,-βz/α))
+        n_ = FourVector((-α,0.,0.,0.))
 
+        γi = gi + symmetric(@einsum n[μ]*n[ν])
+
+        ∂tg = βx*dx + βy*dy + βz*dz - α*P
+
+        # collect metric derivatives
+        ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(Zero)))
+        
+        # Calculate Christoffel symbols
+        Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν]))
+
+        ∂trootγ = @einsum 0.5*γi[μ,ν]*∂tg[μ,ν]
+
+        #########################################################
+        # Principle (linear) part of the evolution equations
+
+        ∂tdx = Dx(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
+
+        ∂tdy = Dy(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
+
+        ∂tdz = Dz(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
+
+        ∂tP  = -Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,xi,yi,zi)
+
+        #########################################################
+        # Non-linear terms in the evolution equations
+
+        ∂tP -=   α*symmetric(@einsum (μ,ν) ->  gi[λ,γ]*gi[ϵ,σ]*Γ[λ,ϵ,σ]*∂g[γ,μ,ν])
+
+        ∂tP += 2*α*symmetric(@einsum (μ,ν) -> gi[ϵ,σ]*gi[λ,ρ]*∂g[λ,ϵ,μ]*∂g[ρ,σ,ν])
+    
+        ∂tP -= 2*α*symmetric(@einsum (μ,ν) ->   gi[ϵ,σ]*gi[λ,ρ]*Γ[μ,ϵ,λ]*Γ[ν,σ,ρ])
+
+        ∂tP -= ∂trootγ*P
+
+        #########################################################
+        # Constraints and constraint damping terms
+
+        γ0 = 1. # Harmonic constraint damping (>0)
+        #γ1 = -1. # Linear Degeneracy parameter (=-1)
         γ2 = 0. # Derivative constraint damping (>0)
         
         Cx = Dx(fg,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx - dx
         Cy = Dy(fg,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy - dy
         Cz = Dz(fg,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz - dz
 
-        #########################################################
-        # Principle part of the evolution equations
+        ∂tdx += γ2*Cx
+        ∂tdy += γ2*Cy
+        ∂tdz += γ2*Cz
 
-        ∂tg = βx*dx + βy*dy + βz*dz - α*P
+        # Generalized Harmonic constraints and damping
 
-        ∂tdx = Dx(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx + γ2*Cx
+        C_ = @einsum gi[ϵ,σ]*Γ[μ,ϵ,σ] # - Hxy[μ]
 
-        ∂tdy = Dy(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy + γ2*Cy
+        ∂tP += γ0*α*symmetric(@einsum (μ,ν) -> 2C_[μ]*n_[ν] - g[μ,ν]*n[ϵ]*C_[ϵ]) # + C_[ν]*n_[μ]
 
-        ∂tdz = Dz(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz + γ2*Cz
+        ∂tP += -γ2*(βx*Cx + βy*Cy + βz*Cz)
 
-        ∂tP  = -Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,xi,yi,zi)
-
-        #########################################################
+        ########################################################
 
         ∂tU  = StateVector(∂tg,∂tdx,∂tdy,∂tdz,∂tP)
 
@@ -982,10 +1060,10 @@ end
     n = Int(100*scale)
     ns = (n,n,n)             # numerical grid resolution; should be a mulitple of 32-1 for optimal GPU perf
     nx, ny, nz = ns
-    nt         = 1000#Int(1000*scale)                 # number of timesteps
+    nt         = 100#Int(1000*scale)                 # number of timesteps
 
     SAVE = false
-    VISUAL = false
+    VISUAL = true
     nout       = 10#Int(10*scale)                       # plotting frequency
     noutsave   = 10000#Int(50*scale) 
 
@@ -1088,7 +1166,8 @@ end
     # r=(1.,1.,1.)
     # return @code_warntype SAT(U1,ns,ls,ds,(1,1,1),(nx,ny,nz),(0.,0.,0.),(0.,0.,0.),r,ri)
 
-    #return @benchmark @parallel rhs!($U1,$U2,$U3,$ns,$ls,$ds,1)
+    #return @benchmark rhs!($U1,$U2,$U3,$ns,$ls,$ds,1)
+    return @benchmark @parallel (1:$nx,1:$ny,1:$nz) rhs!($U1,$U2,$U3,$ns,$ls,$ds,1)
 
     # Preparation to save
 
@@ -1142,12 +1221,10 @@ end
                 heatmap(X, Y, A, aspect_ratio=1, xlims=(-lx/2,lx/2)
                 ,ylims=(-ly/2,ly/2),clim=(-0.1,0.1), c=:viridis,frame=:box)
 
-
                 ang = range(0, 2π, length = 60)
                 circle(x,y,r) = Shape(r*sin.(ang).+x, r*cos.(ang).+y)  
 
-                plot!(circle(0,0,25),fc=:transparent, legend = false, 
-                colorbar = true)
+                plot!(circle(0,0,25),fc=:transparent, legend = false, colorbar = true)
 
                 frame(anim)
 

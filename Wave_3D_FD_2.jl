@@ -19,29 +19,19 @@ using Plots, Printf, Statistics, BenchmarkTools, ForwardDiff
 
 using Tensorial, InteractiveUtils
 
-using RootSolvers # Roots
-
-# Alias for SymmetricSecondOrderTensor 2x2
-const TwoTensor{T} = SymmetricSecondOrderTensor{2,T,3}
-
-# Alias for non-symmetric 3 tensor
-const ThreeTensor{T} = SecondOrderTensor{3,T,9}
+using RootSolvers # (Roots.jl does not work on GPU)
 
 # Alias for non-symmetric 3 tensor
 const StateTensor = SymmetricSecondOrderTensor{4,Data.Number,10}
 
-# Alias for StateVector of a scalar field
-const StateScalar{T} = Vec{4,T}
-
-# Alias for tensor to hold metric derivatives and Christoffel Symbols
-# Defined to be symmetric in the last two indices
-const Symmetric3rdOrderTensor{T} = Tensor{Tuple{3,@Symmetry{3,3}},T,3,18}
-
-
 @CellType WaveCell fieldnames=(ψ,ψx,ψy,ψz,Ψ)
 
+# Some convenience values for these types
 const NotANumber = WaveCell(NaN,NaN,NaN,NaN,NaN)
 const Zero = WaveCell(0.,0.,0.,0.,0.)
+
+# Defintions of coefficents for embedded boundary finite differencing operators
+# All of this can be found here: https://doi.org/10.1016/j.jcp.2016.12.034
 
 # const q11 = -24/17.; const q21 = 59/34. ;
 # const q31 = -4/17. ; const q41 = -3/34. ;
@@ -150,71 +140,15 @@ const Zero = WaveCell(0.,0.,0.,0.,0.)
 
 @inline fψ(U::WaveCell) = U.ψ
 
-@inline function ψu(U::WaveCell) # Scalar gradient-flux
-    
-    # Give names to stored arrays from the state vector
-    Ψ = U.Ψ
+@inline ψu(U::WaveCell) = -U.Ψ # Scalar gradient-flux
 
-    # gi = inverse(g)
+@inline vx(U::WaveCell) = U.ψx # vector gradient-flux
 
-    # α = 1/sqrt(-gi[1,1])
+@inline vy(U::WaveCell) = U.ψy # vector gradient-flux
 
-    # βr = -gi[1,2]/gi[1,1]
-    # βθ = -gi[1,3]/gi[1,1]
+@inline vz(U::WaveCell) = U.ψz # vector gradient-flux
 
-    return -Ψ
-
-end
-
-@inline function vx(U::WaveCell) # Scalar gradient-flux
-    
-    # Give names to stored arrays from the state vector
-    ψx = U.ψx
-
-    # gi = inverse(g)
-
-    # α = 1/sqrt(-gi[1,1])
-
-    # βr = -gi[1,2]/gi[1,1]
-    # βθ = -gi[1,3]/gi[1,1]
-
-    return ψx
-
-end
-
-@inline function vy(U::WaveCell) # Scalar gradient-flux
-    
-    # Give names to stored arrays from the state vector
-    ψy = U.ψy
-
-    # gi = inverse(g)
-
-    # α = 1/sqrt(-gi[1,1])
-
-    # βr = -gi[1,2]/gi[1,1]
-    # βθ = -gi[1,3]/gi[1,1]
-
-    return ψy
-
-end
-
-@inline function vz(U::WaveCell) # Scalar gradient-flux
-    
-    # Give names to stored arrays from the state vector
-    ψz = U.ψz
-
-    # gi = inverse(g)
-
-    # α = 1/sqrt(-gi[1,1])
-
-    # βr = -gi[1,2]/gi[1,1]
-    # βθ = -gi[1,3]/gi[1,1]
-
-    return ψz
-
-end
-
-Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
+Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k)  # x-derivative
     nl,nr = (nls[1], nrs[1])
     nlr = (nl, nr)
     αs = (αls[1], αrs[1])
@@ -226,13 +160,11 @@ Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
     elseif nr-nl==1 # not enough points for 2nd order stencil, go to 1st order 2 point
         -U(nl) + U(nr) # note the two point operator happens to be the same for both points
     else # only one grid point, extrapolate derivative
-        #println(nl," ",nr," ",i," ",j," ",k)
-        throw(0.)
+        throw(0.) # not implemented
     end
-    
 end
 
-Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
+Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k)  # y-derivative
     nl,nr = (nls[2], nrs[2])
     nlr = (nl, nr)
     αs = (αls[2], αrs[2])
@@ -244,12 +176,11 @@ Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
     elseif nr-nl==1 # not enough points for 2nd order stencil, go to 1st order 2 point
         -U(nl) + U(nr) # note the two point operator happens to be the same for both points
     else # only one grid point, extrapolate derivative
-        throw(0.)
+        throw(0.) # not implemented
     end
-    
 end
 
-Base.@propagate_inbounds @inline function Dz(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
+Base.@propagate_inbounds @inline function Dz(f,Um,ns,nls,nrs,αls,αrs,i,j,k)  # z-derivative
     nl,nr = (nls[3], nrs[3])
     nlr = (nl, nr)
     αs = (αls[3], αrs[3])
@@ -261,9 +192,8 @@ Base.@propagate_inbounds @inline function Dz(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
     elseif nr-nl==1 # not enough points for 2nd order stencil, go to 1st order 2 point
         -U(nl) + U(nr) # note the two point operator happens to be the same for both points
     else # only one grid point, extrapolate derivative
-        throw(0.)
+        throw(0.) # not implemented
     end
-    
 end
 
 # Base.@propagate_inbounds @inline function D_4_2(U,ns,αs,k)
@@ -292,7 +222,7 @@ end
 #     end
 # end
 
-Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k)
+Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k) # Second order accurate stencil
     nl,nr = ns
     αl,αr = αs
     if k in nl+2:nr-2
@@ -306,13 +236,11 @@ Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k)
     elseif k==nr-1
         -(q2_21(αr)*U(nr) + q2_22(αr)*U(nr-1) + U(nr-2)/2)/h2_22(αr)
     else
-        #return 0.
-        #println(nl," ",nr," ",αl," ",αr," ",k)
         throw(0.)
     end
 end
 
-Base.@propagate_inbounds @inline function D_3point(U,ns,αs,k)
+Base.@propagate_inbounds @inline function D_3point(U,ns,αs,k) # First order accurate stencil for 3 points
     nl,nr = ns
     αl,αr = αs
     throw(0.)
@@ -325,7 +253,7 @@ Base.@propagate_inbounds @inline function D_3point(U,ns,αs,k)
     end
 end
 
-Base.@propagate_inbounds @inline function D4(U,ns,αs,k)
+Base.@propagate_inbounds @inline function D4(U,ns,αs,k) # Fourth derivative stencil for dissipation
     nl,nr = ns
     αl,αr = αs
     if k in nl+3:nr-3
@@ -347,7 +275,7 @@ Base.@propagate_inbounds @inline function D4(U,ns,αs,k)
     end
 end
 
-Base.@propagate_inbounds @inline function Dissipation(Um,ns,nls,nrs,αls,αrs,i,j,k)
+Base.@propagate_inbounds @inline function Dissipation(Um,ns,nls,nrs,αls,αrs,i,j,k)  # Dissipation in all directions
     @inbounds @inline Ux(x) = getindex(Um,x,j,k)
     @inbounds @inline Uy(x) = getindex(Um,i,x,k)
     @inbounds @inline Uz(x) = getindex(Um,i,j,x)
@@ -355,49 +283,26 @@ Base.@propagate_inbounds @inline function Dissipation(Um,ns,nls,nrs,αls,αrs,i,
     D4(Ux,(nls[1],nrs[1]),(αls[1],αrs[1]),i) + D4(Uy,(nls[2],nrs[2]),(αls[2],αrs[2]),j) + D4(Uz,(nls[3],nrs[3]),(αls[3],αrs[3]),k)
 end
 
-Base.@propagate_inbounds @inline function Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,i,j,k)
+Base.@propagate_inbounds @inline function Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,i,j,k) # Calculate the divergence of the flux
     dx,dy,dz,_ = ds
     Dx(vx,U,ns,nls,nrs,αls,αrs,i,j,k)/dx + Dy(vy,U,ns,nls,nrs,αls,αrs,i,j,k)/dy + Dz(vz,U,ns,nls,nrs,αls,αrs,i,j,k)/dz
 end
 
 Base.@propagate_inbounds @inline function vectors(outer,rb,ri,ns,i,l)
-    # Returns the normal vector to the boundary.
-    # Forms the normal vector to the boundary depending
-    # If you are on a face, edge, or corner
-
-    # lx,ly,lz=ls
-
-    # X,Y,Z = -lx/2:dx:lx/2, -ly/2:dy:ly/2, -lz/2:dz:lz/2
-
-    # x,y,z = X[xi],Y[yi],Z[zi]
-    nx,ny,nz = ns
+    # Returns the null basis to the boundary
+    # The embedded boundary method effectively treats the boundary as "Lego" objects
+    # with boundary normals only in one of the 3 cardinal directions.
+    # Retruns upper index vectors and a mixed index boundary 2-metric
 
     sx,sy,sz = (0.,0.,0)
 
-    # if outer
-
-    #     xi,yi,zi = ri
-
-    #     if xi==1; (sx = -1.) elseif xi==ns[1]; (sx = 1.) end
-    #     if yi==1; (sy = -1.) elseif yi==ns[2]; (sy = 1.) end
-    #     if zi==1; (sz = -1.) elseif zi==ns[3]; (sz = 1.) end
-
-    #     #if nlr in (1,nx,ny,nz)
-
-    # else
-
-    #     if i==1; (sx = l) end
-    #     if i==2; (sy = l) end
-    #     if i==3; (sz = l) end
-
-    #     # x,y,z = rb
-
-    #     # sx = -x; sy = -y; sz = -z; 
-    # end
-
-    if i==1; (sx = l) end
-    if i==2; (sy = l) end
-    if i==3; (sz = l) end
+    if     i==1
+        (sx = l)
+    elseif i==2 
+        (sy = l)
+    else#if i==3
+         (sz = l)
+    end
 
     norm = sqrt(sx^2 + sy^2 + sz^2)
 
@@ -418,6 +323,14 @@ Base.@propagate_inbounds @inline function vectors(outer,rb,ri,ns,i,l)
 end
 
 @inline function find_boundary(ns,ls,ds,r,ri)
+    # Returns a tuple of various objects needed to know where the boundary is.
+    # The nl and nr are the left and right farthest grid cell indices in all 3 directions
+    # The αl and αr are the left and right distances from that last grid cell to the boundary 
+    # in units of the grid spacing in all 3 directions
+    #
+    # To prevent unnecessary computations, we only perform the root solver if the boundary is within
+    # five grid cells of the current point, as if this is not the case, then the boundary position 
+    # does not matter to the stencils or boundary conditions.
 
     xi,yi,zi = ri
 
@@ -516,6 +429,10 @@ end
 end
 
 Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
+    # Performs the boundary conditions in each direction
+    # Since the StateVector on the boundary is not in the domain, its value must be extrapolated.
+    # Since the boundary position is not in the domain, the application of boundary conditions
+    # must also be extrapolated.
 
     lx,ly,lz = ls
     dx,dy,dz,_=ds
@@ -686,7 +603,7 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
 
 end
 
-function energy_cell(U,ns,ls,ds,ri)
+function energy_cell(U,ns,ls,ds,ri) # calculates wave energy in a cell
 
     ψx = U.ψx
     ψy = U.ψy
@@ -722,6 +639,9 @@ end
 
 
 @parallel_indices (xi,yi,zi) function rhs!(U1::Data.CellArray,U2::Data.CellArray,U3::Data.CellArray,ns::Tuple,ls::Tuple,ds::Tuple,iter::Int)
+    # Performs the right hand side of the system of equations.
+    # The if blocks at the beginning and end perform the 3rd order Runge-Kutta algorithm
+    # which is done by calling rhs! three times, each with a different value in iter ranging from 1:3
 
     if iter == 1
         U = U1
@@ -884,6 +804,7 @@ end
     U3 = @zeros(ns..., celltype=WaveCell)
 
     if USE_GPU
+        # If we use the GPU, we need an intermediate array on the CPU to save
         U0 = CPUCellArray{WaveCell}(undef, nx, ny, nz)
     end
 
@@ -976,19 +897,10 @@ end
 
         if (it==11)  global wtime0 = Base.time()  end
 
-        bulk = (1:nx,1:ny,1:nz)
-
-        # First stage (iter=1)
-
-        @parallel bulk rhs!(U1,U2,U3,ns,ls,ds,1) 
- 
-        # Second stage (iter=2)
-    
-        @parallel bulk rhs!(U1,U2,U3,ns,ls,ds,2) 
-    
-        # Third stage (iter=3)
-    
-        @parallel bulk rhs!(U1,U2,U3,ns,ls,ds,3) 
+        # Perform RK3 algorithm
+        for i in 1:3
+            @parallel (1:nx,1:ny,1:nz) rhs!(U1,U2,U3,ns,ls,ds,i) 
+        end
 
         t = t + dt
 
@@ -1026,6 +938,7 @@ end
 
         end
 
+        # saving
         if SAVE && mod(it,noutsave)==0
 
             if USE_GPU
@@ -1042,6 +955,7 @@ end
     end
 
     catch error
+        GC.gc(true)
         close(datafile)
         throw(error)
     end
