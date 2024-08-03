@@ -7,8 +7,6 @@ using CellArrays, StaticArrays
 using HDF5
 using FileIO
 
-using Polyester
-
 ParallelStencil.@reset_parallel_stencil()
 
 @static if USE_GPU
@@ -16,16 +14,13 @@ ParallelStencil.@reset_parallel_stencil()
     @init_parallel_stencil(CUDA, Float64, 3)
 else
     @init_parallel_stencil(Threads, Float64, 3)
-    #@init_parallel_stencil(Polyester, Float64, 3)
 end
 
 using Plots, Printf, Statistics, BenchmarkTools, ForwardDiff
 
 using Tensorial, InteractiveUtils
 
-#using RootSolvers # (Roots.jl does not work on GPU)
-
-using Roots
+using RootSolvers # (Roots.jl does not work on GPU)
 
 # Alias for non-symmetric 3 tensor
 const StateTensor = SymmetricSecondOrderTensor{4,Data.Number,10}
@@ -117,43 +112,44 @@ const Zero = StateVector(0.,0.,0.,0.,0.)
 # Coefficent functions for second order diagonal norm 
 # embedded boundary SBP operator
 
-@inline el2_1(a) = (a+1)
-@inline el2_2(a) = -a
+@inline el1(a) = (a+1)
+@inline el2(a) = -a
 
-@inline h2_11(a) = (a + 1)^2/2
-@inline h2_22(a) = 1 - a^2/2
+@inline h00(a) = (a+1)/4
+@inline h11(a) = (a+1)^2/4
+@inline h22(a) = (4+a-a^2)/4
 
-@inline Q2_12(a) = (a+1)/2
-
-@inline q2_21(a) = -Q2_12(a) - el2_1(a)*el2_2(a)/2
-@inline q2_22(a) = -el2_2(a)^2/2
+@inline Q00(a) = -1/2
+@inline Q01(a) = (a+1)/4
+@inline Q02(a) = (1-a)/4
+@inline Q12(a) = (a+1)/4
 
 ##################################################################
 # Coefficent functions for 3-point embedded boundary SBP operator
 
-@inline el1(a,b) = 1+a-b/2
-@inline el2(a,b) = -a+b
-@inline el3(a,b) = -b/2
+# @inline el1(a,b) = 1+a-b/2
+# @inline el2(a,b) = -a+b
+# @inline el3(a,b) = -b/2
 
-@inline er1(a,b) = -a/2
-@inline er2(a,b) = a-b
-@inline er3(a,b) = 1+b-a/2
+# @inline er1(a,b) = -a/2
+# @inline er2(a,b) = a-b
+# @inline er3(a,b) = 1+b-a/2
 
-@inline h11(a,b) = a^2/4 - b^2/4 + a + 3/4
-@inline h22(a,b) = 1/2
-@inline h33(a,b) = b^2/4 - a^2/4 + b + 3/4
+# @inline h11(a,b) = a^2/4 - b^2/4 + a + 3/4
+# @inline h22(a,b) = 1/2
+# @inline h33(a,b) = b^2/4 - a^2/4 + b + 3/4
 
-@inline Q12(a,b) = a^2/4 + b^2/4 - a*b/2 + a/2 - b/2 + 1/4
-@inline Q13(a,b) = -a^2/4 - b^2/4 + a*b/2 + a/4 + b/4 + 1/4
-@inline Q23(a,b) = Q12(a,b)
+# @inline Q12(a,b) = a^2/4 + b^2/4 - a*b/2 + a/2 - b/2 + 1/4
+# @inline Q13(a,b) = -a^2/4 - b^2/4 + a*b/2 + a/4 + b/4 + 1/4
+# @inline Q23(a,b) = Q12(a,b)
 
-@inline q11(a,b) = er1(a,b)^2/2 - el1(a,b)^2/2
-@inline q12(a,b) = Q12(a,b) + er1(a,b)*er2(a,b)/2 - el1(a,b)*el2(a,b)/2
-@inline q13(a,b) = Q13(a,b) + er1(a,b)*er3(a,b)/2 - el1(a,b)*el3(a,b)/2
+# @inline q11(a,b) = er1(a,b)^2/2 - el1(a,b)^2/2
+# @inline q12(a,b) = Q12(a,b) + er1(a,b)*er2(a,b)/2 - el1(a,b)*el2(a,b)/2
+# @inline q13(a,b) = Q13(a,b) + er1(a,b)*er3(a,b)/2 - el1(a,b)*el3(a,b)/2
 
-@inline q31(a,b) = -Q13(a,b) + er1(a,b)*er3(a,b)/2 - el1(a,b)*el3(a,b)/2
-@inline q32(a,b) = -Q23(a,b) + er3(a,b)*er2(a,b)/2 - el3(a,b)*el2(a,b)/2
-@inline q33(a,b) = er3(a,b)^2/2 - el3(a,b)^2/2
+# @inline q31(a,b) = -Q13(a,b) + er1(a,b)*er3(a,b)/2 - el1(a,b)*el3(a,b)/2
+# @inline q32(a,b) = -Q23(a,b) + er3(a,b)*er2(a,b)/2 - el3(a,b)*el2(a,b)/2
+# @inline q33(a,b) = er3(a,b)^2/2 - el3(a,b)^2/2
 
 
 @inline fψ(U::StateVector) = U.ψ
@@ -170,7 +166,7 @@ Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k)  #
     nl,nr = (nls[1], nrs[1])
     nlr = (nl, nr)
     αs = (αls[1], αrs[1])
-    @inbounds @inline U(x) = f(getindex(Um,x,j,k))
+    @inbounds @inline U(x::Int) = f(getindex(Um,x,j,k))
     if nr-nl>=3 # not enough points for 4th order stencil, go to 2nd order
         D_2_1(U,nlr,αs,i)
     elseif nr-nl==2 # not enough points for 2nd order stencil, go to 1st order 3 point
@@ -246,16 +242,21 @@ Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k) # Second order accur
     if k in nl+2:nr-2
         (-U(k-1) + U(k+1))/2
     elseif k==nl
-        -U(nl) + U(nl+1)
+        Ub = el1(αl)*U(nl) + el2(αl)*U(nl+1)
+        (-Q01(αl)*Ub + Q12(αl)*U(nl+1))/h11(αl)
     elseif k==nl+1
-        (q2_21(αl)*U(nl) + q2_22(αl)*U(nl+1) + U(nl+2)/2)/h2_22(αl)
+        Ub = el1(αl)*U(nl) + el2(αl)*U(nl+1)
+        (-Q02(αl)*Ub - Q12(αl)*U(nl) + U(nl+2)/2)/h22(αl)
     elseif k==nr
-        U(nr) - U(nr-1)
+        Ub = el1(αr)*U(nr) + el2(αr)*U(nr-1)
+        -(-Q01(αr)*Ub + Q12(αr)*U(nr-1))/h11(αr)
     elseif k==nr-1
-        -(q2_21(αr)*U(nr) + q2_22(αr)*U(nr-1) + U(nr-2)/2)/h2_22(αr)
+        Ub = el1(αr)*U(nr) + el2(αr)*U(nr-1)
+        -(-Q02(αr)*Ub - Q12(αr)*U(nr) + U(nr-2)/2)/h22(αr)
     else
         throw(0.)
     end
+
 end
 
 Base.@propagate_inbounds @inline function D_3point(U,ns,αs,k) # First order accurate stencil for 3 points
@@ -321,11 +322,6 @@ Base.@propagate_inbounds @inline function vectors(outer,rb,ri,ns,i,l)
     else#if i==3
          (sz = l)
     end
-
-    # x,y,z = rb
-    # sx = -x
-    # sy = -y
-    # sz = -z
 
     # if outer 
     #     if     i==1
@@ -398,60 +394,61 @@ end
     a = 1/1000
 
     # x-line
-    i = xi+3
-    x0 = x+3*dx
+    i = xi+5
+    x0 = x+5*dx
     if (i <= nx && sign(f(x0,y,z))≠s)
-        rb = find_zero(x->f(x,y,z), (x,x0), atol=a*dx, rtol=a*dx, Bisection())+lx/2
-        #rb = find_zero(x->f(x,y,z), SecantMethod{Float64}(x,x0),CompactSolution(),SolutionTolerance{Float64}(a)).root+lx/2
+        #rb = find_zero(x->f(x,y,z), (x,x0), atol=a*dx, rtol=a*dx, Bisection())+lx/2
+        rb = find_zero(x->f(x,y,z), SecantMethod{Float64}(x,x0), CompactSolution()).root+lx/2
         temp,αrx = divrem(rb,dx,RoundDown)
         αrx /= dx; xibr=Int(temp)+1;
     end
 
-    i = xi-3
-    x0 = x-3*dx
+    i = xi-5
+    x0 = x-5*dx
     if (i >= 1 && sign(f(x0,y,z))≠s)
-        rb = find_zero(x->f(x,y,z), (x0,x), atol=a*dx, rtol=a*dx, Bisection())+lx/2
-        #rb = find_zero(x->f(x,y,z), SecantMethod{Float64}(x0,x),CompactSolution(),SolutionTolerance{Float64}(a)).root+lx/2
+        #rb = find_zero(x->f(x,y,z), (x0,x), atol=a*dx, rtol=a*dx, Bisection())+lx/2
+        rb = find_zero(x->f(x,y,z), SecantMethod{Float64}(x0,x), CompactSolution()).root+lx/2
         temp,αlx = divrem(rb,dx,RoundUp)
         αlx /= -dx; xibl=Int(temp)+1;
     end
 
     # y-line
-    i = yi+3
-    y0 = y+3*dy
+    i = yi+5
+    y0 = y+5*dy
     if (i <= ny && sign(f(x,y0,z))≠s)
-        rb = find_zero(y->f(x,y,z), (y,y0), atol=a*dy, rtol=a*dy, Bisection())+ly/2
-        #rb = find_zero(y->f(x,y,z), SecantMethod{Float64}(y,y0), CompactSolution(),SolutionTolerance{Float64}(a)).root+ly/2
+        #rb = find_zero(y->f(x,y,z), (y,y0), atol=a*dy, rtol=a*dy, Bisection())+ly/2
+        rb = find_zero(y->f(x,y,z), SecantMethod{Float64}(y,y0), CompactSolution()).root+ly/2
         temp,αry = divrem(rb,dy,RoundDown)
         αry /= dy; yibr=Int(temp)+1;
     end
 
-    i = yi-3
-    y0 = y-3*dy
+    i = yi-5
+    y0 = y-5*dy
     if (i >= 1 && sign(f(x,y0,z))≠s)
-        rb = find_zero(y->f(x,y,z), (y0,y), atol=a*dy, rtol=a*dy, Bisection())+ly/2
-        #rb = find_zero(y->f(x,y,z), SecantMethod{Float64}(y0,y), CompactSolution(),SolutionTolerance{Float64}(a)).root+ly/2
+        #rb = find_zero(y->f(x,y,z), (y0,y), atol=a*dy, rtol=a*dy, Bisection())+ly/2
+        rb = find_zero(y->f(x,y,z), SecantMethod{Float64}(y0,y), CompactSolution()).root+ly/2
         temp,αly = divrem(rb,dy,RoundUp)
         αly /= -dy; yibl=Int(temp)+1;
     end
 
     # z-line
-    i = zi+3
-    z0 = z+3*dz
+    i = zi+5
+    z0 = z+5*dz
     if (i <= nz && sign(f(x,y,z0))≠s)
-        rb = find_zero(z->f(x,y,z), (z,z0), atol=a*dz, rtol=a*dz, Bisection())+lz/2
-        #rb = find_zero(z->f(x,y,z), SecantMethod{Float64}(z,z0), CompactSolution(),SolutionTolerance{Float64}(a)).root+lz/2
+        #rb = find_zero(z->f(x,y,z), (z,z0), atol=a*dz, rtol=a*dz, Bisection())+lz/2
+        rb = find_zero(z->f(x,y,z), SecantMethod{Float64}(z,z0), CompactSolution()).root+lz/2
         temp,αrz = divrem(rb,dz,RoundDown)
         αrz /= dz; zibr=Int(temp)+1;
     end
 
-    i = zi-3
-    z0 = z-3*dz
+    i = zi-5
+    z0 = z-5*dz
     if (i >= 1 && sign(f(x,y,z0))≠s)
-        rb = find_zero(z->f(x,y,z), (z0,z), atol=a*dz, rtol=a*dz, Bisection())+lz/2
-        #rb = find_zero(z->f(x,y,z), SecantMethod{Float64}(z0,z), CompactSolution(),SolutionTolerance{Float64}(a)).root+lz/2
+        #rb = find_zero(z->f(x,y,z), (z0,z), atol=a*dz, rtol=a*dz, Bisection())+lz/2
+        rb = find_zero(z->f(x,y,z), SecantMethod{Float64}(z0,z), CompactSolution()).root+lz/2
         temp,αlz = divrem(rb,dz,RoundUp)
-        αlz /= -dz; zibl=Int(temp)+1
+        αlz /= -dz
+        zibl=Int(temp)+1
     end
 
     nl = (xibl,yibl,zibl)
@@ -464,47 +461,6 @@ end
     return (outside,nl,nr,αl,αr)
 
 end
-
-# Base.@propagate_inbounds @inline function Boundary_Constraints(U,ns,ls,ds,nls,nrs,αls,αrs,ri,left,i)
-
-#     xi,yi,zi = ri
-#     lx,ly,lz = ls
-#     dx,dy,dz,_ = ds
-
-#     nl = nls[i]
-#     nr = nrs[i]
-#     αl = αls[i]
-#     αr = αrs[i]
-
-#     @inline function D_i(i,xi,yi,zi)
-#         if i==1
-#             r = (-lx/2 + (xi-1)*dx,-ly/2 + (yi-1)*dy, -lz/2 + (zi-1)*dz)
-#             #Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k)
-#             Dx(fψ,U,ns,find_boundary(ns,ls,ds,r,(xi,yi,zi))[2:end]...,xi,yi,zi)/dx
-#         elseif i==2
-#             r = (-lx/2 + (xi-1)*dx,-ly/2 + (yi-1)*dy, -lz/2 + (zi-1)*dz)
-#             Dy(fψ,U,ns,find_boundary(ns,ls,ds,r,(xi,yi,zi))[2:end]...,xi,yi,zi)/dy
-#         else#if i==3
-#             r = (-lx/2 + (xi-1)*dx,-ly/2 + (yi-1)*dy, -lz/2 + (zi-1)*dz)
-#             Dz(fψ,U,ns,find_boundary(ns,ls,ds,r,(xi,yi,zi))[2:end]...,xi,yi,zi)/dz
-#         end
-#     end
-
-#     @inline index(ind,dir) = if dir==1; (ind,yi,zi) elseif dir==2; (xi,ind,zi) else (xi,yi,ind) end
-
-#     if left
-#         ∂xψb = el2_1(αl)*D_i(1,index(nl,i)...) + el2_2(αl)*D_i(1,index(nl+1,i)...)
-#         ∂yψb = el2_1(αl)*D_i(2,index(nl,i)...) + el2_2(αl)*D_i(2,index(nl+1,i)...)
-#         ∂zψb = el2_1(αl)*D_i(3,index(nl,i)...) + el2_2(αl)*D_i(3,index(nl+1,i)...)
-#     else
-#         ∂xψb = el2_1(αr)*D_i(1,index(nr,i)...) + el2_2(αr)*D_i(1,index(nr-1,i)...)
-#         ∂yψb = el2_1(αr)*D_i(2,index(nr,i)...) + el2_2(αr)*D_i(2,index(nr-1,i)...)
-#         ∂zψb = el2_1(αr)*D_i(3,index(nr,i)...) + el2_2(αr)*D_i(3,index(nr-1,i)...)
-#     end
-
-#     return (∂xψb,∂yψb,∂zψb)
-
-# end
 
 Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
     # Performs the boundary conditions in each direction
@@ -537,13 +493,13 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
             # and determine the boundary position on the coordinate line
             if i == 1 # On an x-line
                 rb = (-lx/2+(nl-1)*dx-αl*dx,y,z)
-                Ub = el2_1(αl)*U[nl,yi,zi] + el2_2(αl)*U[nl+1,yi,zi]
+                Ub = el1(αl)*U[nl,yi,zi] + el2(αl)*U[nl+1,yi,zi]
             elseif i == 2 # On a y-line
                 rb = (x,-ly/2+(nl-1)*dy-αl*dy,z)
-                Ub = el2_1(αl)*U[xi,nl,zi] + el2_2(αl)*U[xi,nl+1,zi]
+                Ub = el1(αl)*U[xi,nl,zi] + el2(αl)*U[xi,nl+1,zi]
             elseif i == 3 # On a z-line
                 rb = (x,y,-lz/2+(nl-1)*dz-αl*dz)
-                Ub = el2_1(αl)*U[xi,yi,nl] + el2_2(αl)*U[xi,yi,nl+1]
+                Ub = el1(αl)*U[xi,yi,nl] + el2(αl)*U[xi,yi,nl+1]
             end
 
             outer = (nl == 1)
@@ -586,9 +542,9 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
             ∂ψBC =  U0b - k*UmBC - ℓ*Upb
 
             if ri[i] == nl 
-                ε = el2_1(αl)/h2_11(αl)/ds[i]
+                ε = el1(αl)/h00(αl)/ds[i]
             elseif ri[i] == nl+1
-                ε = el2_2(αl)/h2_22(αl)/ds[i]
+                ε = el2(αl)/h00(αl)/ds[i]
             end
 
             # s = (k-ℓ)/sqrt(2)
@@ -620,13 +576,13 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
             # and determine the boundary position on the coordinate line
             if i == 1 # On an x-line
                 rb = (-lx/2+(nr-1)*dx+αr*dx,y,z)
-                Ub = el2_1(αr)*U[nr,yi,zi] + el2_2(αr)*U[nr-1,yi,zi]
+                Ub = el1(αr)*U[nr,yi,zi] + el2(αr)*U[nr-1,yi,zi]
             elseif i == 2 # On a y-line
                 rb = (x,-ly/2+(nr-1)*dy+αr*dy,z)
-                Ub = el2_1(αr)*U[xi,nr,zi] + el2_2(αr)*U[xi,nr-1,zi]
+                Ub = el1(αr)*U[xi,nr,zi] + el2(αr)*U[xi,nr-1,zi]
             elseif i == 3 # On a z-line
                 rb = (x,y,-lz/2+(nr-1)*dz+αr*dz)
-                Ub = el2_1(αr)*U[xi,yi,nr] + el2_2(αr)*U[xi,yi,nr-1]
+                Ub = el1(αr)*U[xi,yi,nr] + el2(αr)*U[xi,yi,nr-1]
             end
 
             outer =  (nr == ns[i])
@@ -669,9 +625,9 @@ Base.@propagate_inbounds @inline function SAT(U,ns,ls,ds,nls,nrs,αls,αrs,r,ri)
             ∂ψBC =  U0b - k*UmBC - ℓ*Upb
 
             if ri[i] == nr
-                ε = el2_1(αr)/h2_11(αr)/ds[i]
+                ε = el1(αr)/h00(αr)/ds[i]
             elseif ri[i] == nr-1
-                ε = el2_2(αr)/h2_22(αr)/ds[i]
+                ε = el2(αr)/h00(αr)/ds[i]
             end
 
             # s = (k-ℓ)/sqrt(2)
@@ -825,7 +781,7 @@ end
         # Uw[xi,yi,zi] = Uwxyz
 
 
-        Uw[xi,yi,zi] = NotANumber
+        Uw[xi,yi,zi] = Zero
         
 
     end
@@ -852,12 +808,12 @@ end
     n = Int(100*scale)
     ns = (n,n,n)             # numerical grid resolution; should be a mulitple of 32-1 for optimal GPU perf
     nx, ny, nz = ns
-    nt         = 10#Int(1000*scale)                 # number of timesteps
+    nt         = 5*Int(1000*scale)                 # number of timesteps
 
     SAVE = false
     VISUAL = true
-    nout       = 1#Int(10*scale)                       # plotting frequency
-    noutsave   = 1#Int(50*scale) 
+    nout       = 5*Int(10*scale)                       # plotting frequency
+    noutsave   = Int(50*scale) 
 
 
     save_size = 50
@@ -1013,8 +969,8 @@ end
         # Visualisation
         if VISUAL && (mod(it,nout)==0)
 
-            zi = Int(ceil(nz/2))
-            #A = [(Dx(fψ,U1,ns,find_boundary(ns,ls,ds,(X[xi],Y[yi],Z[zi]),(xi,yi,zi))[2:5]...,xi,yi,zi)/dx - U1[xi,yi,zi].ψx) for xi in 1:nx, yi in 1:ny]
+            # zi = Int(ceil(nz/2))
+            # A = [(Dx(fψ,U1,ns,find_boundary(ns,ls,ds,(X[xi],Y[yi],Z[zi]),(xi,yi,zi))[2:5]...,xi,yi,zi)/dx - U1[xi,yi,zi].ψx) for xi in 1:nx, yi in 1:ny]
 
             A = Array(CellArrays.field(U1,1))[slice...]
             heatmap(X, Y, A, aspect_ratio=1, xlims=(-lx/2,lx/2)
