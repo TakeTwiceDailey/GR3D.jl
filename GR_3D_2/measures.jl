@@ -32,7 +32,7 @@ function constraints(U::StateVector,H_,Rb,ns,ds,ls,ri)
         # Calculate time derivative of the metric
         ∂tg = βx*dx + βy*dy + βz*dz - α*P
 
-        ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(ZeroST)))
+        ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (∂tg[μ,ν],dx[μ,ν],dy[μ,ν],dz[μ,ν])[σ])
 
         Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν]))    
 
@@ -97,6 +97,71 @@ function constraint_energy_cell(U,H_,Rb,ns,ls,ds,ri)
         end
 
         return abs(@einsum m[μ,ν]*C_[μ]*C_[ν])*h*rootγ(U)*dx*dy*dz
+
+    else
+
+        return 0.
+
+    end
+
+end
+
+function state_vector_energy_cell(U,Rb,ns,ls,ds,ri)
+    # Calculates the energy estimate (not yet implemented)
+
+    g  = U.g
+    dx = U.dx
+    dy = U.dy
+    dz = U.dz
+    P  = U.P
+
+    xi,yi,zi = ri
+
+    hx,hy,hz,_ = ds
+    lx,ly,lz=ls
+    x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz;
+    r = (x,y,z)
+
+    in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri)
+
+    if in_domain
+
+        gi = inv(g)
+
+        α = 1/sqrt(-gi[1,1])
+
+        βx = -gi[1,2]/gi[1,1]
+        βy = -gi[1,3]/gi[1,1]
+        βz = -gi[1,4]/gi[1,1]
+
+        β = FourVector((0,βx,βy,βz))
+
+        n  = FourVector((1,-βx,-βy,-βz))/α
+
+        m = gi + 2*symmetric(@einsum n[μ]*n[ν])
+
+        ∂tg = βx*dx + βy*dy + βz*dz - α*P
+
+        ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (∂tg[μ,ν],dx[μ,ν],dy[μ,ν],dz[μ,ν])[σ])
+
+        h = 1.
+
+        for i in 1:3
+            if ri[i] == nrs[i]
+                h *= h2_11(αrs[i])
+            elseif ri[i] == nrs[i]-1
+                h *= h2_22(αrs[i])
+            elseif ri[i] == nls[i]
+                h *= h2_11(αls[i])
+            elseif ri[i] == nls[i]+1
+                h *= h2_22(αls[i])
+            end
+        end
+
+        En = α*(@einsum m[α,β]*m[μ,ν]*m[ϵ,σ]*∂g[α,μ,ϵ]*∂g[β,ν,σ])
+        En -= 2*(@einsum m[α,β]*m[μ,ν]*P[μ,α]*β[σ]*∂g[σ,ν,β])
+
+        return 0.5*En*h*rootγ(U)*hx*hy*hz
 
     else
 

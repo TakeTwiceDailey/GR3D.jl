@@ -22,6 +22,8 @@ using Distributions
 
 using DoubleFloats
 
+using LaTeXStrings
+
 ParallelStencil.@reset_parallel_stencil()
 
 const USE_GPU = false  # Use GPU? If this is set false, then no GPU needs to be available
@@ -142,9 +144,9 @@ include("measures.jl")
         #########################################################
         # Constraints and constraint damping terms (16%)
 
-        γ0 = 0.5 # Harmonic constraint damping (>0)
+        γ0 = 1. # Harmonic constraint damping (>0)
         #γ1 = -1. # Linear Degeneracy parameter (=-1)
-        γ2 = 0.5 # Derivative constraint damping (>0)
+        γ2 = 1. # Derivative constraint damping (>0)
 
         Cx = Dx(fg,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx - dx
         Cy = Dy(fg,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy - dy
@@ -173,7 +175,7 @@ include("measures.jl")
         # end
 
         # Add numerical dissipation (20%)
-        ∂tU += -0.05*Dissipation(U,ns,ds,nls,nrs,αls,αrs,xi,yi,zi) #-0.05
+        ∂tU += -0.1*Dissipation(U,ns,ds,nls,nrs,αls,αrs,xi,yi,zi) #-0.05 α
 
         if iter == 1
             U1t = Uxyz
@@ -364,34 +366,29 @@ end
 @views function main()
 
     # Physics
-    lx, ly, lz = 40.0, 40.0, 40.0  # domain extends
+    lx, ly, lz = 20.0, 20.0, 20.0  # domain extends
     ls = (lx,ly,lz)
     t  = 0.0                          # physical start time
+    tmax = 50.0
 
     # global mass = 0.
     # global spin = 0.5*mass
 
     # println("Horizon at: r_+ = ", round((1+sqrt(1-(spin/mass)^2))*mass,sigdigits=3))
-    # @code_warntype cfg = 
-    # return @benchmark StateTensor((μ,ν) -> 0.5*(f∂H_(1.,1.,1.,μ,ν)+f∂H_(1.,1.,1.,ν,μ)))
-
-    # return @benchmark fUmBC(FourVector((1,1,1,1)),1.,1.,1.)
-
-    #scale = 1.
 
     # Numerics
-    num = 48 #48,72,108,162,243 (goes up by factors of 1.5) #Int(100*scale)
+    num = 81 # 81,108,144,192,256
     ns = (num,num,num)             # numerical grid resolution; should be a mulitple of 32-1 for optimal GPU perf
     nx, ny, nz = ns
-    nt     = 1000 #Int(1000*scale)                 # number of timesteps
 
-    Rb = 4. # boundary radius
+    Rb = 1.5 # boundary radius
 
     SAVE = false
     VISUAL = true
     constraint_init = true
     nout       = 10 #Int(10*scale)                       # plotting frequency
     noutsave   = 500 #Int(50*scale) 
+    pdfout     = 10*nout #Int(10*scale) 
 
     save_size = 1
     step = Int(num/save_size)
@@ -401,6 +398,10 @@ end
     CFL = 1/5
     dt = min(hx,hy,hz)*CFL
     ds = (hx,hy,hz,dt)
+
+    #return 0.05/hx
+
+    nt = Int(round(tmax/dt, RoundUp))           # number of timesteps
 
     coords = (-lx/2:hx:lx/2, -ly/2:hy:ly/2, -lz/2:hz:lz/2)
     X,Y,Z = coords
@@ -413,8 +414,8 @@ end
         U2 =  CuCellArray{StateVector}(undef, nx, ny, nz)
         U3 =  CuCellArray{StateVector}(undef, nx, ny, nz)
 
-        H  =  CuCellArray{FourVector}(undef, nx, ny, nz)
-        ∂H =  CuCellArray{StateTensor}(undef, nx, ny, nz)
+        # H  =  CuCellArray{FourVector}(undef, nx, ny, nz)
+        # ∂H =  CuCellArray{StateTensor}(undef, nx, ny, nz)
     else
         U0 =  CPUCellArray{StateVector}(undef, nx, ny, nz)
         U1 =  CPUCellArray{StateVector}(undef, nx, ny, nz)
@@ -434,7 +435,16 @@ end
         lx,ly,lz=ls
         x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz;
 
-        g = StateTensor(g_init(x,y,z))
+        r = (x,y,z)
+        ri = (xi,yi,zi)
+    
+        in_domain,_,_,_,_ = find_boundary(Rb,ns,ls,ds,r,ri)
+
+        if in_domain 
+            g = StateTensor(g_init(x,y,z))
+        else
+            g = ZeroST
+        end
 
         Uw[xi,yi,zi] = StateVector(g,ZeroST,ZeroST,ZeroST,ZeroST)
 
@@ -443,6 +453,19 @@ end
     # write the rest of the state vector
     @parallel (1:nx,1:ny,1:nz) initialize!(Uw,H,∂H,Rb,ns,ds,ls,constraint_init)
 
+    plotcolors = cgrad([RGB(0.148,0.33,0.54),RGB(0.509,0.4825,0.52),RGB(0.9,0.62,0.29),RGB(0.9625,0.77625,0.484),RGB(1,0.95,0.75)], [0.2,0.4,0.6,0.8])
+
+    # zi = Int(ceil(nz/2))
+
+    # B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else U.g[2,2] end) for xi in 1:nx, yi in 1:ny]
+
+    # #B = [(Hp=H[xi,yi,zi]; if any(isnan.(Hp)); NaN else Hp[2] end) for xi in 1:nx, yi in 1:ny]
+
+    # p = heatmap(Y, X, B, aspect_ratio=1, xlims=(-ly/2,ly/2)
+    # ,ylims=(-lx/2,lx/2),clim=(0,5), title = "Time = "*string(round(t; digits=2)), c=plotcolors,frame=:box)
+
+    # return p
+
     # copy to other arrays
     if USE_GPU; copy!(U1.data, U0.data) end
 
@@ -450,6 +473,8 @@ end
     copy!(U3.data, U1.data)
 
     copy!(U0.data, U1.data)
+
+
 
     # ri=(75,53,53)
     # xi,yi,zi = ri
@@ -486,22 +511,26 @@ end
 
     # Preparation to save
 
-    # path = string("3D_data")
-    # old_files = readdir(path; join=true)
-    # for i in 1:length(old_files) 
-    #     rm(old_files[i]) 
-    # end
-    # datafile = h5open(path*"/data.h5","cw")
+    path = string("3D_data")
+    rm(path*"/data"*string(num)*".h5",force=true)
+    datafile = h5open(path*"/data"*string(num)*".h5","cw")
+
     # nsave = 1#Int64(nt/noutsave) + 1
     # gdata = create_dataset(datafile, "phi", datatype(Data.Number), 
     #         dataspace(nsave,6,save_size,save_size,save_size), 
     #         chunk=(1,6,save_size,save_size,save_size))
 
     # Preparation of visualisation
-    ENV["GKSwstype"]="nul"; if isdir("viz3D_out")==false mkdir("viz3D_out") end; loadpath = "./viz3D_out/"; anim = Animation(loadpath,String[])
-    old_files = readdir(loadpath; join=true)
-    for i in 1:length(old_files) rm(old_files[i]) end
+    ENV["GKSwstype"]="nul"; if isdir("viz3D_out")==false mkdir("viz3D_out") end
+    loadpath = "./viz3D_out/"
+    anim = Animation(loadpath,String[])
+    old_files1 = readdir(loadpath; join=true)
+    for i in 1:length(old_files1) rm(old_files1[i]) end
     println("Animation directory: $(anim.dir)")
+
+    if isdir("pdfs")==false mkdir("pdfs") end
+    old_files2 = readdir("./pdfs/"; join=true)
+    for i in 1:length(old_files2) rm(old_files2[i]) end
 
     # slice       = (:,:,Int(ceil(nz/2)))
 
@@ -525,13 +554,19 @@ end
     #return Profile.print()
     #return @benchmark @parallel (1:$nx,1:$ny,1:$nz) rhs!($U1,$U2,$U3,$ns,$ls,$ds,$t,3)
 
-    C_vec = fill(10^(-10),Int(nt/nout+1))
+    vis_steps = Int(round(nt/nout,RoundDown)+1)
 
-    H_vec1 = fill(-10.,Int(nt/nout+1))
+    mass1data = create_dataset(datafile, "mass1", Data.Number, (vis_steps,))
+    mass2data = create_dataset(datafile, "mass2", Data.Number, (vis_steps,))
+    areadata  = create_dataset(datafile, "area", Data.Number, (vis_steps,))
+    condata   = create_dataset(datafile, "constraints", Data.Number, (vis_steps,))
+    energydata = create_dataset(datafile, "energy", Data.Number, (vis_steps,))
 
-    H_vec2 = fill(-10.,Int(nt/nout+1))
-
-    A_vec = fill(-10.,Int(nt/nout+1))
+    H_vec1 = fill(-10.,vis_steps)
+    H_vec2 = fill(-10.,vis_steps)
+    A_vec = fill(-10.,vis_steps)
+    C_vec = fill(10^(-10),vis_steps)
+    E_vec = fill(zero(Data.Number),vis_steps)
 
     iter = 1
     it = 1
@@ -556,11 +591,13 @@ end
                 else
                     volume = 0.
                     Cint = 0.
+                    Energy = 0.
                     for xi in 1:nx, yi in 1:ny, zi in 1:nz
                         H_ = FourVector(H[xi,yi,zi].data)
                         Cint += constraint_energy_cell(U1[xi,yi,zi],H_,Rb,ns,ls,ds,(xi,yi,zi))
                         volume += volume_cell(U1[xi,yi,zi],Rb,ns,ls,ds,(xi,yi,zi))
                         Cnorm = sqrt(Cint/volume)
+                        Energy += state_vector_energy_cell(U1[xi,yi,zi],Rb,ns,ls,ds,(xi,yi,zi))
                     end
 
                     A1 = SurfaceIntegral(Area,U1,ns,ds,ls,Rb)
@@ -584,13 +621,19 @@ end
                 end
 
                 #append!(C_vec,result)
-                C_vec[Int(round(it/nout+1))] = Cnorm
+                ti = Int(round(it/nout+1))
 
-                H_vec1[Int(round(it/nout+1))] = (Hmass1 - Hmass1_init)/Hmass1_init
+                C_vec[ti] = Cnorm
+                H_vec1[ti] = (Hmass1 - Hmass1_init)/Hmass1_init
+                H_vec2[ti] = (Hmass2 - Hmass2_init)/Hmass2_init
+                A_vec[ti] = (A1 - A_init)/A_init
+                E_vec[ti] = Energy
 
-                H_vec2[Int(round(it/nout+1))] = (Hmass2 - Hmass2_init)/Hmass2_init
-
-                A_vec[Int(round(it/nout+1))] = (A1 - A_init)/A_init
+                mass1data[ti]  = (Hmass1 - Hmass1_init)/Hmass1_init
+                mass2data[ti]  = (Hmass2 - Hmass2_init)/Hmass2_init
+                areadata[ti]   = (A1 - A_init)/A_init
+                condata[ti]    = Cnorm
+                energydata[ti] = Energy
 
                 #A = Array(getindex.(CellArrays.field(U1,1),1,1))[slice...] .+ 1
 
@@ -599,19 +642,34 @@ end
                 #B = [(Dx(fg,U1,ns,find_boundary(ns,ls,ds,(X[xi],Y[yi],Z[zi]),(xi,yi,zi))[2:5]...,xi,yi,zi)/hx - U1[xi,yi,zi].dx)[1,1] for xi in 1:nx, yi in 1:ny]
                 #B = [constraints(U1[xi,yi,zi],FourVector(H[xi,yi,zi].data),Rb,ns,ds,ls,(xi,yi,zi))[1] for xi in 1:nx, yi in 1:ny]
                 #B = [(rootγ(U1[xi,yi,zi])[1])^2-1 for xi in 1:nx, yi in 1:ny]
-                B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else u(U1[xi,yi,zi])[2,2] end) for xi in 1:nx, yi in 1:ny]
+                B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else u(U)[2,2] end) for xi in 1:nx, yi in 1:ny]
 
-                heatmap(X, Y, B, aspect_ratio=1, xlims=(-lx/2,lx/2)
-                ,ylims=(-ly/2,ly/2),clim=(-0.05,0.05), title = "Time = "*string(round(t; digits=2)), c=:viridis,frame=:box)
+                colorbar_ticks = (0:0.2:1.0, string.(round.(Int, (0:0.2:1.0) .* 100), "%"))
+
+                time = round(t; digits=1)
+
+                heatmap(Y, X, B, aspect_ratio=1,
+                ylims=(-ly/2,ly/2),
+                xlims=(-lx/2,lx/2),
+                clim=(-0.05,0.05), 
+                xlabel=L"x/M_0",
+                ylabel=L"y/M_0",
+                title = L"\partial_t g_{xx}(t = %$time, z = 0)", 
+                c=plotcolors,frame=:box,
+                fontfamily = "Computer Modern")
 
                 ang = range(0, 2π, length = 60)
                 circle(x,y,r) = Shape(r*sin.(ang).+x, r*cos.(ang).+y)  
 
                 p1 = plot!(circle(0,0,Rb),fc=:transparent, legend = false, colorbar = true)
 
+                if mod(it,pdfout)==0
+                    savefig("pdfs/"*lpad(it,6,"0")*".pdf")
+                end
+
                 p2 = plot(C_vec, yaxis=:log, ylim = (10^(-5), 10^(1)), minorgrid=true) #[C_vec H_vec]
 
-                p3 = plot([H_vec1 A_vec H_vec2], ylim = (-0.1, 0.1),label=["Mass1" "Area" "Mass2"])
+                p3 = plot([H_vec1 A_vec H_vec2], ylim = (-0.1, 0.5),label=["Mass1" "Area" "Mass2"])
 
                 plot(p1,p2,p3, layout=grid(3,1,heights=(3/5,1/5,1/5)),size=(700,800),legend=false)
 
@@ -623,7 +681,7 @@ end
 
             # Perform RK3 algorithm
             for i in 1:3
-                #@parallel (1:nx,1:ny,1:nz) test!(U1,U2,U3,Rb,ns,ds,ls,i) 
+                @parallel (1:nx,1:ny,1:nz) test!(U1,U2,U3,Rb,ns,ds,ls,i) 
                 @parallel (1:nx,1:ny,1:nz) rhs!(U1,U2,U3,H,∂H,Rb,ns,ls,ds,t,i) 
             end
 
@@ -647,7 +705,7 @@ end
         end
 
     catch error
-        #close(datafile)
+        close(datafile)
         GC.gc(true)
         #throw(error)
         # Print error if one is encountered, with line of occurance
@@ -670,7 +728,15 @@ end
         println(stderr)
     end
 
-    #close(datafile)
+    #save stuff
+
+    # mass1data = H_vec1
+    # mass2data = H_vec2
+    # areadata  = A_vec
+    # condata   = C_vec
+    # energydata = E_vec
+
+    close(datafile)
 
     # Performance metrics
     wtime    = Base.time() - wtime0

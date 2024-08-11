@@ -320,7 +320,7 @@ end
     #UmBC1 = ZeroST
     if outer
         UmBC1  = fUmBC(ℓ,xb,yb,zb)
-        UmBCGW = (1+fGW)*fUmBC(ℓ,xb,yb,zb) #+ fGW*StateTensor(symmetric(σ_))
+        UmBCGW = (1+fGW)*fUmBC(ℓ,xb,yb,zb)
 
         # UmBC1  = Neumann(0.)
         # UmBCGW = Neumann(0.)
@@ -434,8 +434,8 @@ Base.@propagate_inbounds @inline function SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t
                 Amp = 1.
 
                 σx = 5.
-                σy = 19.
-                σz = 19.
+                σy = 0.9*lx/2
+                σz = 0.9*lx/2
                 r0 = -lx/2-σx
 
                 rp = sqrt(((xb-(r0+t))/σx)^2+(yb/σy)^2+(zb/σz)^2)
@@ -446,7 +446,7 @@ Base.@propagate_inbounds @inline function SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t
                 #C_BC = model*FourVector((1.,0.,0.,0.))
 
                 #UmBCGW = zero(StateTensor)
-                fGW =  75*model
+                fGW = 130*model
                 #fGW = 1.
 
                 k,ℓ,σ = vectors(Ub,outer,ns,ri,rb) # Form boundary basis
@@ -522,15 +522,15 @@ Base.@propagate_inbounds @inline function SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t
                 Amp = 1.
 
                 σx = 5.
-                σy = 19.
-                σz = 19.
+                σy = 0.9*lx/2
+                σz = 0.9*lx/2
                 r0 = lx/2+σx
 
                 rp = sqrt(((xb-(r0-t))/σx)^2+(yb/σy)^2+(zb/σz)^2)
 
                 model =  (outer&&(rp<1)) ? Amp*(rp-1)^4*(rp+1)^4 : 0.
 
-                fGW =  75*model
+                fGW =  130*model
                 #fGW = 1.
 
                 k,ℓ,σ = vectors(Ub,outer,ns,ri,rb) # Form boundary basis
