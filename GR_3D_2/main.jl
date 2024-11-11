@@ -29,25 +29,28 @@ ParallelStencil.@reset_parallel_stencil()
 const USE_GPU = false  # Use GPU? If this is set false, then no GPU needs to be available
 
 @static if USE_GPU
+    # GPU isn't faster than CPU at the moment, so I gave up on it.
+    # If you want to use it, you need to include RootSolvers.jl, as Roots.jl doesn't work on GPU
+    # You also have to change the root solver functions in the boundary finder
     @define_CuCellArray() # without this CuCellArrays don't work
     @init_parallel_stencil(CUDA, Float64, 3)
 else
     @init_parallel_stencil(Threads, Float64, 3)
-    #@init_parallel_stencil(Polyester, Float64, 3)
+    #@init_parallel_stencil(Polyester, Float64, 3) # Polyester is supposed to be faster than Threads, needs testing
 end
 
-include("types.jl")
-include("initial_conditions.jl")
-include("boundaries.jl")
-include("differencing.jl")
-include("measures.jl")
+include("types.jl")               # Define StateVector types and various other types used during the evolution
+include("initial_conditions.jl")  # Sets Initial conditions. Go here if you want to change mass/spin of black hole.
+include("boundaries.jl")          # Deals with finding the boundaries and applying the boundary conditions 
+include("differencing.jl")        # Defines finite differencing operators in the SBP embedded boundary framework
+include("measures.jl")            # Defines quasi-local measures like Hawking mass and closed surface integration
 
 @parallel_indices (xi,yi,zi) function rhs!(U1,U2,U3,H,∂H,Rb,ns::Tuple,ls::Tuple,ds::Tuple,t::Data.Number,iter::Int)
-    # Performs the right hand side of the system of equations.
-    # The if blocks at the beginning and end perform the 3rd order Runge-Kutta algorithm
+    # Performs the right hand side of the system of generalized harmonic evolution equations.
+    # The if-else blocks at the beginning and end perform the 3rd order Runge-Kutta algorithm
     # which is done by calling rhs! three times, each with a different value in iter ranging from 1:3
 
-    if iter == 1 # U is the current read memory, and Uw is the current write memory
+    if iter == 1 # U is the current iteration read memory, and Uw is the current iteration write memory
         U = U1
         Uw = U2
     elseif iter == 2
@@ -60,18 +63,17 @@ include("measures.jl")
 
     hx,hy,hz,dt = ds
     lx,ly,lz=ls
-    x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz;
+    x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz; # Cartesian position of current kernel calculation
 
     r = (x,y,z)
-    ri = (xi,yi,zi)
+    ri = (xi,yi,zi) 
 
-    in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri)
+    in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri) 
+    # finds if any boundaries are nearby, and checks if we are in a memory point inside or outside domain
 
-    if in_domain
+    if in_domain     # Don't do evolution if outside of domain
 
-        if sign(x^2+y^2+z^2-Rb^2)==-1; throw(0.) end
-
-        Uxyz = U[xi,yi,zi]
+        Uxyz = U[xi,yi,zi]  
 
         H_ = FourVector(H[xi,yi,zi].data) # FourVector(fH_(x,y,z))
 
@@ -83,7 +85,7 @@ include("measures.jl")
         dz = Uxyz.dz
         P  = Uxyz.P
 
-        gi = inv(g)
+        gi = inv(g)  # Invert metric
 
         α = 1/sqrt(-gi[1,1]) # Calculate lapse
     
@@ -91,12 +93,12 @@ include("measures.jl")
         βy = -gi[1,3]/gi[1,1]
         βz = -gi[1,4]/gi[1,1]
 
-        n  = FourVector((1,-βx,-βy,-βz))/α
+        n  = FourVector((1,-βx,-βy,-βz))/α  # normal to spatial slices
         n_ = FourVector((-α,0.,0.,0.))
 
-        γi = gi + symmetric(@einsum n[μ]*n[ν])
+        γi = gi + symmetric(@einsum n[μ]*n[ν])  # inverse 3-metric
 
-        ∂tg = βx*dx + βy*dy + βz*dz - α*P
+        ∂tg = βx*dx + βy*dy + βz*dz - α*P  # time derivative of metric
 
         # collect metric derivatives
         ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (∂tg[μ,ν],dx[μ,ν],dy[μ,ν],dz[μ,ν])[σ])
@@ -104,14 +106,13 @@ include("measures.jl")
         # Calculate Christoffel symbols
         Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν]))
 
+        #  misc
         ∂tlnrootγ = @einsum 0.5*γi[μ,ν]*∂tg[μ,ν]
 
         Γ_ = @einsum gi[ϵ,σ]*Γ[μ,ϵ,σ]
 
         #########################################################
         # Principle (linear) part of the evolution equations
-
-        #try
 
         ∂tdx = Dx(u,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
 
@@ -121,13 +122,8 @@ include("measures.jl")
 
         ∂tP  = Div(vx,vy,vz,U,ns,nls,nrs,αls,αrs,ds,xi,yi,zi)
 
-        # catch e
-        #     println(ri," ",nls," ",nrs)
-        #     throw(e)
-        # end
-
         #########################################################
-        # Non-linear terms in the evolution equations (34%)
+        # Non-linear terms in the evolution equations (34% of runtime)
 
         ∂tP -= ∂tlnrootγ*P
 
@@ -142,7 +138,7 @@ include("measures.jl")
         ∂tP -= 2*α*symmetric(@einsum (μ,ν) -> gi[ϵ,σ]*gi[λ,ρ]*Γ[μ,ϵ,λ]*Γ[ν,σ,ρ])
 
         #########################################################
-        # Constraints and constraint damping terms (16%)
+        # Constraints and constraint damping terms (16% of runtime)
 
         γ0 = 1. # Harmonic constraint damping (>0)
         #γ1 = -1. # Linear Degeneracy parameter (=-1)
@@ -168,15 +164,13 @@ include("measures.jl")
 
         ∂tU  = StateVector(∂tg,∂tdx,∂tdy,∂tdz,∂tP)
 
-        # Perform boundary conditions (12%)
+        # Perform boundary conditions (12% of runtime)
         ∂tU += SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t,ri,γ2)
 
-        # if !in_bulk 
-        # end
+        # Add numerical dissipation (20% of runtime)
+        ∂tU += -0.1*Dissipation(U,ns,ds,nls,nrs,αls,αrs,xi,yi,zi)
 
-        # Add numerical dissipation (20%)
-        ∂tU += -0.1*Dissipation(U,ns,ds,nls,nrs,αls,αrs,xi,yi,zi) #-0.05 α
-
+        # Perform Runge-Kutta 3rd order current iteration step
         if iter == 1
             U1t = Uxyz
             Uwxyz = U1t + dt*∂tU
@@ -195,21 +189,18 @@ include("measures.jl")
     else # don't do anything if not in the computational domain
 
 
-        Uw[xi,yi,zi] = NaNSV
+        Uw[xi,yi,zi] = NaNSV  # Write NaN to these points so that we are sure no information leaves closed boundaries
         #Uw[xi,yi,zi] = MinSV
         
 
     end
 
-    # 250 ms benchmark total
     return
 
 end
 
 @parallel_indices (xi,yi,zi) function test!(U1,U2,U3,Rb,ns,ds,ls,iter::Int)
-    # Performs the right hand side of the system of equations.
-    # The if blocks at the beginning and end perform the 3rd order Runge-Kutta algorithm
-    # which is done by calling rhs! three times, each with a different value in iter ranging from 1:3
+    # Allows for testing at each step. Helpful if you can't figure out where an instability is starting
 
     if iter == 1 # U is the current read memory, and Uw is the current write memory
         U = U1
@@ -229,7 +220,7 @@ end
     r = (x,y,z)
     ri = (xi,yi,zi)
 
-    in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri)
+    in_domain,_,_,_,_ = find_boundary(Rb,ns,ls,ds,r,ri)
 
     if in_domain
 
@@ -242,10 +233,10 @@ end
         gi = inv(g)
 
         if det(ThreeTensor(γs))<0
-            println("γ ",(xi,yi,zi))
+            println("γ ",(xi,yi,zi)) # The 3-metric determinant is not positive at this point
             throw(0.)
         elseif -gi[1,1]<0
-            println("α ",(xi,yi,zi))
+            println("α ",(xi,yi,zi)) # The lapse is undefined at this point
             throw(0.)
         end
     end
@@ -256,7 +247,7 @@ end
 
 @parallel_indices (xi,yi,zi) function initialize!(Uw,H,∂H,Rb,ns,ds,ls,constraint_init)
     # Initializes the initial conditions to arrays
-    # the metric must be written to the array first if one desires constraint initialization
+    # the metric must be written to the array first if one desires constraint satisfying initialization
     
     hx,hy,hz,dt = ds
     lx,ly,lz=ls
@@ -307,10 +298,6 @@ end
 
         P2 = -(∂tg - βx*dx - βy*dy - βz*dz)/α
 
-        # ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (∂tg[μ,ν], dx[μ,ν], dy[μ,ν], dz[μ,ν])[σ])
-
-        # Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν])) 
-
         H[xi,yi,zi]  = fH_(x,y,z)
 
         ∂H[xi,yi,zi] = f∂H_(x,y,z)
@@ -333,7 +320,7 @@ end
 
             model = (μ0-σ0)<r<(μ0+σ0) ? (Amp/σ0^8)*(r-(μ0-σ0))^4*(r-(μ0+σ0))^4 : 0.
 
-            Cf_ = 0*model*n_
+            Cf_ = 0*model*n_   # set desired form of initial gauge constraint violation
 
             H_ = FourVector(fH_(x,y,z).data) 
 
@@ -345,11 +332,11 @@ end
             P = P2
         end
 
-        #P = P2
-
         Uw[xi,yi,zi] = StateVector(g,dx,dy,dz,P)
 
     else
+
+        # Write NaN here to be sure these points never reach into the computational domain
 
         Uw[xi,yi,zi] = NaNSV
         H[xi,yi,zi]  = SVector{4}(NaN,NaN,NaN,NaN)
@@ -365,43 +352,38 @@ end
 ##################################################
 @views function main()
 
-    # Physics
-    lx, ly, lz = 20.0, 20.0, 20.0  # domain extends
+    # Spacetime Domain size
+    lx, ly, lz = 20.0, 20.0, 20.0  # spatial domain extends
     ls = (lx,ly,lz)
-    t  = 0.0                          # physical start time
-    tmax = 50.0
-
-    # global mass = 0.
-    # global spin = 0.5*mass
-
-    # println("Horizon at: r_+ = ", round((1+sqrt(1-(spin/mass)^2))*mass,sigdigits=3))
+    t  = 0.0                       # physical start time
+    tmax = 100.0                   # physical end time
 
     # Numerics
     num = 81 # 81,108,144,192,256
-    ns = (num,num,num)             # numerical grid resolution; should be a mulitple of 32-1 for optimal GPU perf
+    ns = (num,num,num)   # numerical grid resolution; should be a mulitple of 32-1 for optimal GPU perf
     nx, ny, nz = ns
 
-    Rb = 1.5 # boundary radius
+    Rb = 2.0 # inner boundary radius (check this is outside or inside the horizon as desired)
 
     SAVE = false
     VISUAL = true
     constraint_init = true
-    nout       = 10 #Int(10*scale)                       # plotting frequency
-    noutsave   = 500 #Int(50*scale) 
-    pdfout     = 10*nout #Int(10*scale) 
+    nout       = 100 #Int(10*scale)         # plotting frequency
+    noutsave   = 500 #Int(50*scale)         # not implemented
+    pdfout     = 4*nout #Int(10*scale)      # pdf frequency
 
     save_size = 1
     step = Int(num/save_size)
 
     # Derived numerics
     hx, hy, hz = lx/(nx-1), ly/(ny-1), lz/(nz-1) # cell sizes
-    CFL = 1/5
-    dt = min(hx,hy,hz)*CFL
-    ds = (hx,hy,hz,dt)
+    CFL = 1/5                                    # conservative CFL factor
+    dt = min(hx,hy,hz)*CFL      # time step size
+    ds = (hx,hy,hz,dt)          # spacetime size of discrete cells
 
     #return 0.05/hx
 
-    nt = Int(round(tmax/dt, RoundUp))           # number of timesteps
+    nt = Int(round(tmax/dt, RoundUp))           # total number of timesteps that will be taken
 
     coords = (-lx/2:hx:lx/2, -ly/2:hy:ly/2, -lz/2:hz:lz/2)
     X,Y,Z = coords
@@ -426,7 +408,7 @@ end
         ∂H =  CPUCellArray{SVector{10,Data.Number}}(undef, nx, ny, nz)
     end
 
-    if USE_GPU; Uw = U0 else Uw = U1 end
+    if USE_GPU; Uw = U0 else Uw = U1 end # which Array do we initially write to?
 
     # Sample the Kerr-Schild form of the metric only
     for xi in 1:ns[1], yi in 1:ns[2], zi in 1:ns[3]
@@ -443,7 +425,7 @@ end
         if in_domain 
             g = StateTensor(g_init(x,y,z))
         else
-            g = ZeroST
+            g = ZeroST   # Sample a zero metric (undefined determinant) so we are sure these potitions never reach into domain
         end
 
         Uw[xi,yi,zi] = StateVector(g,ZeroST,ZeroST,ZeroST,ZeroST)
@@ -455,17 +437,6 @@ end
 
     plotcolors = cgrad([RGB(0.148,0.33,0.54),RGB(0.509,0.4825,0.52),RGB(0.9,0.62,0.29),RGB(0.9625,0.77625,0.484),RGB(1,0.95,0.75)], [0.2,0.4,0.6,0.8])
 
-    # zi = Int(ceil(nz/2))
-
-    # B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else U.g[2,2] end) for xi in 1:nx, yi in 1:ny]
-
-    # #B = [(Hp=H[xi,yi,zi]; if any(isnan.(Hp)); NaN else Hp[2] end) for xi in 1:nx, yi in 1:ny]
-
-    # p = heatmap(Y, X, B, aspect_ratio=1, xlims=(-ly/2,ly/2)
-    # ,ylims=(-lx/2,lx/2),clim=(0,5), title = "Time = "*string(round(t; digits=2)), c=plotcolors,frame=:box)
-
-    # return p
-
     # copy to other arrays
     if USE_GPU; copy!(U1.data, U0.data) end
 
@@ -473,41 +444,6 @@ end
     copy!(U3.data, U1.data)
 
     copy!(U0.data, U1.data)
-
-
-
-    # ri=(75,53,53)
-    # xi,yi,zi = ri
-    # x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz;
-    # rb=(x,y,z)
-    # return @code_warntype vectors(U1[1,1,1],true,ns,ri,rb,1,1)
-
-    #return @code_warntype fUmBC(FourVector((1.,1.,1.,1.)),1.,1.,1.,1,1)
-
-    # ri=(75,53,53)
-    # xi,yi,zi = ri
-    # x = -lx/2 + (xi-1)*hx; y = -ly/2 + (yi-1)*hy; z = -lz/2 + (zi-1)*hz;
-    # r=(x,y,z)
-    # return @code_warntype find_boundary(ns,ls,ds,r,ri)
-
-    # k,ℓ,σ,kn,ℓn,σn = vectors(MinST,false,(1.,1.,1.),1,-1) # Form boundary basis
-
-    # return     (ℓ - k)/sqrt(2)
-
-    #return @code_warntype vectors(U1[1,1,1],1,1.)
-
-    # return @code_warntype fH_(1.,1.,1.,1)
-
-    # ri=(1,1,1)
-    # r=(1.,1.,1.)
-    # return @code_warntype SAT(U1,ns,ls,ds,(1,1,1),ns,(0.,0.,0.),(0.,0.,0.),r,t,ri,1.)
-
-    #return @code_warntype BoundaryConditions(U1[1,1,1],false,(1.,1.,1.),(@Vec [1.,1.,1.,1.]),1.,(@Vec [1.,1.,1.,1.]),(@Vec [1.,1.,1.,1.]),ZeroST)
-
-    #return @code_warntype fUmBC((@Vec [1.,1.,1.,1.]),1.,1.,1.,1,1)
-
-    #return @benchmark rhs!($U1,$U2,$U3,$ns,$ls,$ds,1)
-    #return @benchmark @parallel (1:$nx,1:$ny,1:$nz) rhs!($U1,$U2,$U3,$ns,$ls,$ds,0.,1)
 
     # Preparation to save
 
@@ -532,36 +468,16 @@ end
     old_files2 = readdir("./pdfs/"; join=true)
     for i in 1:length(old_files2) rm(old_files2[i]) end
 
-    # slice       = (:,:,Int(ceil(nz/2)))
-
-    # A = [U1[xi,yi,Int(ceil(nz/2))].dx[1,1]-a for xi in 1:nx, yi in 1:ny]
-
-    # heatmap(X, Y, A, aspect_ratio=1, xlims=(-lx/2,lx/2)
-    # ,ylims=(-ly/2,ly/2),clim=(-10^-13,10^-13), title = "Time = "*string(round(t; digits=2)), c=:viridis,frame=:box)
-
-    # ang = range(0, 2π, length = 60)
-    # circle(x,y,r) = Shape(r*sin.(ang).+x, r*cos.(ang).+y)  
-
-    # plot!(circle(0,0,25),fc=:transparent, legend = false, colorbar = true)
-
-    # frame(anim)
-
-    # return
-
-    # bulk = (1:nx,1:ny,1:nz) #@parallel $bulk 
-    # @profile @parallel bulk rhs!(U1,U2,U3,ns,ls,ds,3)
-
-    #return Profile.print()
-    #return @benchmark @parallel (1:$nx,1:$ny,1:$nz) rhs!($U1,$U2,$U3,$ns,$ls,$ds,$t,3)
-
     vis_steps = Int(round(nt/nout,RoundDown)+1)
 
+    # Allocate storage for saving quasi-local measures 
     mass1data = create_dataset(datafile, "mass1", Data.Number, (vis_steps,))
     mass2data = create_dataset(datafile, "mass2", Data.Number, (vis_steps,))
     areadata  = create_dataset(datafile, "area", Data.Number, (vis_steps,))
     condata   = create_dataset(datafile, "constraints", Data.Number, (vis_steps,))
     energydata = create_dataset(datafile, "energy", Data.Number, (vis_steps,))
-
+    
+    # Allocate system memory for saving quasi-local measures 
     H_vec1 = fill(-10.,vis_steps)
     H_vec2 = fill(-10.,vis_steps)
     A_vec = fill(-10.,vis_steps)
@@ -573,14 +489,14 @@ end
 
     try # try block to catch errors, close datafile if so
 
-        # Time loop
-        while it <= nt
+        while it <= nt         # main time loop
 
             if (it==11)  global wtime0 = Base.time()  end # performance timing 
 
             # Visualisation
             if VISUAL && (it==1 || mod(it,nout)==0)
 
+                # Calculate quasi0local measures
                 if USE_GPU
                     copy!(U0.data, U1.data)
                     volume = 0.
@@ -592,6 +508,7 @@ end
                     volume = 0.
                     Cint = 0.
                     Energy = 0.
+                    # Calculate 3-volume based statevector numerical energy
                     for xi in 1:nx, yi in 1:ny, zi in 1:nz
                         H_ = FourVector(H[xi,yi,zi].data)
                         Cint += constraint_energy_cell(U1[xi,yi,zi],H_,Rb,ns,ls,ds,(xi,yi,zi))
@@ -600,13 +517,15 @@ end
                         Energy += state_vector_energy_cell(U1[xi,yi,zi],Rb,ns,ls,ds,(xi,yi,zi))
                     end
 
-                    A1 = SurfaceIntegral(Area,U1,ns,ds,ls,Rb)
-                    int1 = SurfaceIntegral(Hawking_Mass_cell,U1,ns,ds,ls,Rb)
+                    A1 = SurfaceIntegral(Area,U1,ns,ds,ls,Rb) # Calculate surface area of inner boundary
+                    int1 = SurfaceIntegral(Hawking_Mass_cell,U1,ns,ds,ls,Rb) # Calculate Hawking mass of inner boundary
 
                     Hmass1 = sqrt(A1/(16*pi))*(1+int1/(16*pi))
 
-                    A2 = SurfaceIntegral(Area,U1,ns,ds,ls,0.9*lx/2)
-                    int2 = SurfaceIntegral(Hawking_Mass_cell,U1,ns,ds,ls,0.9*lx/2)
+                    rmax = 0.9*ly/2
+
+                    A2 = SurfaceIntegral(Area,U1,ns,ds,ls,rmax) # Calculate surface area of largest sphere
+                    int2 = SurfaceIntegral(Hawking_Mass_cell,U1,ns,ds,ls,rmax) # Calculate Hawking mass of largest sphere
 
                     Hmass2 = sqrt(A2/(16*pi))*(1+int2/(16*pi))
 
@@ -615,14 +534,14 @@ end
                         global Hmass1_init = Hmass1; 
                         global Hmass2_init = Hmass2;
                         println(round(Hmass1, sigdigits=3)," ",round(Hmass2, sigdigits=3)," ",
-                        round(A1/(4π*(Rb)^2)-1, sigdigits=3)," ",round(A2/(4π*(0.9*lx/2)^2)-1, sigdigits=3)) 
+                        round(A1/(4π*(Rb)^2)-1, sigdigits=3)," ",round(A2/(4π*(rmax)^2)-1, sigdigits=3)) 
                     end
 
                 end
 
-                #append!(C_vec,result)
                 ti = Int(round(it/nout+1))
 
+                # save various quasi-local measures or their fractional change
                 C_vec[ti] = Cnorm
                 H_vec1[ti] = (Hmass1 - Hmass1_init)/Hmass1_init
                 H_vec2[ti] = (Hmass2 - Hmass2_init)/Hmass2_init
@@ -642,21 +561,23 @@ end
                 #B = [(Dx(fg,U1,ns,find_boundary(ns,ls,ds,(X[xi],Y[yi],Z[zi]),(xi,yi,zi))[2:5]...,xi,yi,zi)/hx - U1[xi,yi,zi].dx)[1,1] for xi in 1:nx, yi in 1:ny]
                 #B = [constraints(U1[xi,yi,zi],FourVector(H[xi,yi,zi].data),Rb,ns,ds,ls,(xi,yi,zi))[1] for xi in 1:nx, yi in 1:ny]
                 #B = [(rootγ(U1[xi,yi,zi])[1])^2-1 for xi in 1:nx, yi in 1:ny]
-                B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else u(U)[2,2] end) for xi in 1:nx, yi in 1:ny]
-
-                colorbar_ticks = (0:0.2:1.0, string.(round.(Int, (0:0.2:1.0) .* 100), "%"))
+                B = [(U=U1[xi,yi,zi]; if any(isnan.(U.g)); NaN else u(U)[2,2] end) for yi in 1:ny, xi in 1:nx]
 
                 time = round(t; digits=1)
 
-                heatmap(Y, X, B, aspect_ratio=1,
-                ylims=(-ly/2,ly/2),
+                # Create equitorial slice heatmap 
+                heatmap(X, Y, B, aspect_ratio=1,
                 xlims=(-lx/2,lx/2),
-                clim=(-0.05,0.05), 
+                ylims=(-ly/2,ly/2),
+                clim=(-0.01,0.01), 
                 xlabel=L"x/M_0",
                 ylabel=L"y/M_0",
-                title = L"\partial_t g_{xx}(t = %$time, z = 0)", 
+                title = L"\partial_t g_{xx}(t = %$time M_0\,, z = 0)", 
                 c=plotcolors,frame=:box,
-                fontfamily = "Computer Modern")
+                fontfamily = "Computer Modern",
+                tickfontsize  = 14,
+                guidefontsize = 14
+                )
 
                 ang = range(0, 2π, length = 60)
                 circle(x,y,r) = Shape(r*sin.(ang).+x, r*cos.(ang).+y)  
@@ -669,7 +590,7 @@ end
 
                 p2 = plot(C_vec, yaxis=:log, ylim = (10^(-5), 10^(1)), minorgrid=true) #[C_vec H_vec]
 
-                p3 = plot([H_vec1 A_vec H_vec2], ylim = (-0.1, 0.5),label=["Mass1" "Area" "Mass2"])
+                p3 = plot([H_vec1 A_vec H_vec2], ylim = (-0.05, 0.25),label=["Mass1" "Area" "Mass2"])
 
                 plot(p1,p2,p3, layout=grid(3,1,heights=(3/5,1/5,1/5)),size=(700,800),legend=false)
 
@@ -681,13 +602,13 @@ end
 
             # Perform RK3 algorithm
             for i in 1:3
-                @parallel (1:nx,1:ny,1:nz) test!(U1,U2,U3,Rb,ns,ds,ls,i) 
+                #@parallel (1:nx,1:ny,1:nz) test!(U1,U2,U3,Rb,ns,ds,ls,i)  # uncomment for testing
                 @parallel (1:nx,1:ny,1:nz) rhs!(U1,U2,U3,H,∂H,Rb,ns,ls,ds,t,i) 
             end
 
-            t = t + dt
+            t = t + dt # advance time
 
-            if SAVE && mod(it,noutsave)==0
+            if SAVE && mod(it,noutsave)==0  # saving of result if desired
 
                 if USE_GPU
                     copy!(U0.data, U1.data)
@@ -704,7 +625,7 @@ end
 
         end
 
-    catch error
+    catch error    # If an error occured, show what line it happened on, close datafiles, clear memory, etc. 
         close(datafile)
         GC.gc(true)
         #throw(error)
@@ -727,14 +648,6 @@ end
         printstyled(stderr,sprint(showerror,error))
         println(stderr)
     end
-
-    #save stuff
-
-    # mass1data = H_vec1
-    # mass2data = H_vec2
-    # areadata  = A_vec
-    # condata   = C_vec
-    # energydata = E_vec
 
     close(datafile)
 

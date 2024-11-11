@@ -245,7 +245,7 @@ end
     end
 end
 
-Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # x-derivative
+Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # x-derivative stencil
     nl,nr = (nls[1], nrs[1])
     nlr = (nl, nr)
     αs = (αls[1], αrs[1])
@@ -262,7 +262,7 @@ Base.@propagate_inbounds @inline function Dx(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # 
     end
 end
 
-Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # y-derivative
+Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # y-derivative stencil
     nl,nr = (nls[2], nrs[2])
     nlr = (nl, nr)
     αs = (αls[2], αrs[2])
@@ -279,7 +279,7 @@ Base.@propagate_inbounds @inline function Dy(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # 
     end
 end
 
-Base.@propagate_inbounds @inline function Dz(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # z-derivative
+Base.@propagate_inbounds @inline function Dz(f,Um,ns,nls,nrs,αls,αrs,i,j,k) # z-derivative stencil
     nl,nr = (nls[3], nrs[3])
     nlr = (nl, nr)
     αs = (αls[3], αrs[3])
@@ -322,7 +322,7 @@ end
 #     end
 # end
 
-Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k) # Second order accurate stencil
+Base.@propagate_inbounds @inline function D_2_1(U,ns,αs,k) # Second order accurate SBP embedded boundary stencil
     nl,nr = ns
     αl,αr = αs
     if k in nl+2:nr-2

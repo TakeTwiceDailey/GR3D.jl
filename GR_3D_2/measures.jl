@@ -1,5 +1,6 @@
 
-function constraints(U::StateVector,H_,Rb,ns,ds,ls,ri)
+function constraints(U::StateVector,H_,Rb,ns,ds,ls,ri) 
+    # Calculate the gauge constraints
 
     g  = U.g
     dx = U.dx
@@ -49,7 +50,7 @@ function constraints(U::StateVector,H_,Rb,ns,ds,ls,ri)
 end
 
 function constraint_energy_cell(U,H_,Rb,ns,ls,ds,ri)
-    # Calculates the energy estimate (not yet implemented)
+    # Calculates the 3-volume based constraint violation energy estimate
 
     g  = U.g
     # dx = U.dx
@@ -107,7 +108,7 @@ function constraint_energy_cell(U,H_,Rb,ns,ls,ds,ri)
 end
 
 function state_vector_energy_cell(U,Rb,ns,ls,ds,ri)
-    # Calculates the energy estimate (not yet implemented)
+    # Calculates the 3-volume based state vector energy estimate
 
     g  = U.g
     dx = U.dx
@@ -209,95 +210,95 @@ function volume_cell(U,Rb,ns,ls,ds,ri)
 
 end
 
-function invariant(U,∂tU,Rb,ns,ls,ds,ri)
-    # Calculates the Kretschmann Scalar
+# function invariant(U,∂tU,Rb,ns,ls,ds,ri)
+#     # Calculates the Kretschmann Scalar (never actually used)
 
-    hx,hy,hz,_ = ds
-    lx,ly,lz=ls
-    x = -lx/2 + (xi-1)*dx; y = -ly/2 + (yi-1)*dy; z = -lz/2 + (zi-1)*dz;
-    r = (x,y,z)
+#     hx,hy,hz,_ = ds
+#     lx,ly,lz=ls
+#     x = -lx/2 + (xi-1)*dx; y = -ly/2 + (yi-1)*dy; z = -lz/2 + (zi-1)*dz;
+#     r = (x,y,z)
 
-    in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri)
+#     in_domain,nls,nrs,αls,αrs = find_boundary(Rb,ns,ls,ds,r,ri)
 
-    xi,yi,zi = ri
+#     xi,yi,zi = ri
 
-    if in_domain
+#     if in_domain
 
-        g  = U.g
-        dx = U.dx
-        dy = U.dy
-        dz = U.dz
-        P  = U.P
+#         g  = U.g
+#         dx = U.dx
+#         dy = U.dy
+#         dz = U.dz
+#         P  = U.P
     
-        # Second order spatial derivatives
-        ∂xdx = Dx(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
-        ∂xdy = Dx(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
-        ∂xdz = Dx(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
+#         # Second order spatial derivatives
+#         ∂xdx = Dx(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
+#         ∂xdy = Dx(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
+#         ∂xdz = Dx(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hx
     
-        #∂ydx = Dy(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
-        ∂ydy = Dy(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
-        ∂ydz = Dy(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
+#         #∂ydx = Dy(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
+#         ∂ydy = Dy(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
+#         ∂ydz = Dy(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hy
     
-        #∂zdx = Dz(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
-        #∂zdy = Dz(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
-        ∂zdz = Dz(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
+#         #∂zdx = Dz(fdx,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
+#         #∂zdy = Dz(fdy,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
+#         ∂zdz = Dz(fdz,U,ns,nls,nrs,αls,αrs,xi,yi,zi)/hz
     
-        # Second order temporal derivatives
-        ∂tg  = ∂tU.g
-        ∂tdx = ∂tU.dx
-        ∂tdy = ∂tU.dy
-        ∂tdz = ∂tU.dz
-        ∂tP  = ∂tU.P
+#         # Second order temporal derivatives
+#         ∂tg  = ∂tU.g
+#         ∂tdx = ∂tU.dx
+#         ∂tdy = ∂tU.dy
+#         ∂tdz = ∂tU.dz
+#         ∂tP  = ∂tU.P
 
-        gi = inv(g)
+#         gi = inv(g)
         
-        α = 1/sqrt(-gi[1,1]) # Calculate lapse
+#         α = 1/sqrt(-gi[1,1]) # Calculate lapse
     
-        βx = -gi[1,2]/gi[1,1] # Calculate shift vector
-        βy = -gi[1,3]/gi[1,1]
-        βz = -gi[1,4]/gi[1,1]
+#         βx = -gi[1,2]/gi[1,1] # Calculate shift vector
+#         βy = -gi[1,3]/gi[1,1]
+#         βz = -gi[1,4]/gi[1,1]
 
-        n = FourVector((1,-βx,-βy,-βz))/α
+#         n = FourVector((1,-βx,-βy,-βz))/α
 
-        γi = gi + symetric(@einsum n[μ]*n[ν])
+#         γi = gi + symetric(@einsum n[μ]*n[ν])
 
-        ∂tα = -0.5*α*(@einsum n[μ]*n[ν]*∂tg[μ,ν])
+#         ∂tα = -0.5*α*(@einsum n[μ]*n[ν]*∂tg[μ,ν])
 
-        ∂tβ = α*(@einsum γi[σ,μ]*n[ν]*∂tg[μ,ν])
+#         ∂tβ = α*(@einsum γi[σ,μ]*n[ν]*∂tg[μ,ν])
 
-        ∂t∂tg = βx*∂tdx + βy*∂tdy + βz*∂tdz - α*∂tP + ∂tβ[2]*dx + ∂tβ[3]*dy + ∂tβ[4]*dz - ∂tα*P
+#         ∂t∂tg = βx*∂tdx + βy*∂tdy + βz*∂tdz - α*∂tP + ∂tβ[2]*dx + ∂tβ[3]*dy + ∂tβ[4]*dz - ∂tα*P
 
-        # collect metric derivatives
-        ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(ZeroST)))
+#         # collect metric derivatives
+#         ∂g = Symmetric3rdOrderTensor((σ,μ,ν) -> (σ==1 ? ∂tg[μ,ν] : σ==2 ? dx[μ,ν] : σ==3 ? dy[μ,ν] : σ==4 ? dz[μ,ν] : throw(ZeroST)))
         
-        # Assumes derivatives commute, so we can use the symmetric 4th order type
-        ∂∂g = Projection((α,β,μ,ν)-> ((∂t∂tg[μ,ν] , ∂tdx[μ,ν], ∂tdy[μ,ν], ∂tdz[μ,ν] )[β],     #t
-                                      ( ∂tdx[μ,ν] , ∂xdx[μ,ν], ∂xdy[μ,ν], ∂xdz[μ,ν] )[β],     #x
-                                      ( ∂tdy[μ,ν] , ∂xdy[μ,ν], ∂ydy[μ,ν], ∂ydz[μ,ν] )[β],     #y
-                                      ( ∂tdz[μ,ν] , ∂xdz[μ,ν], ∂ydz[μ,ν], ∂zdz[μ,ν] )[β])[α]) #z
+#         # Assumes derivatives commute, so we can use the symmetric 4th order type
+#         ∂∂g = Projection((α,β,μ,ν)-> ((∂t∂tg[μ,ν] , ∂tdx[μ,ν], ∂tdy[μ,ν], ∂tdz[μ,ν] )[β],     #t
+#                                       ( ∂tdx[μ,ν] , ∂xdx[μ,ν], ∂xdy[μ,ν], ∂xdz[μ,ν] )[β],     #x
+#                                       ( ∂tdy[μ,ν] , ∂xdy[μ,ν], ∂ydy[μ,ν], ∂ydz[μ,ν] )[β],     #y
+#                                       ( ∂tdz[μ,ν] , ∂xdz[μ,ν], ∂ydz[μ,ν], ∂zdz[μ,ν] )[β])[α]) #z
 
-        Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν]))
+#         Γ  = Symmetric3rdOrderTensor((σ,μ,ν) -> 0.5*(∂g[ν,μ,σ] + ∂g[μ,ν,σ] - ∂g[σ,μ,ν]))
 
-        ∂Γ = Projection((α,β,μ,ν) -> 0.5*(∂∂g[α,ν,μ,β] + ∂∂g[α,μ,ν,β] - ∂∂g[α,β,μ,ν]))
+#         ∂Γ = Projection((α,β,μ,ν) -> 0.5*(∂∂g[α,ν,μ,β] + ∂∂g[α,μ,ν,β] - ∂∂g[α,β,μ,ν]))
 
-        Rt = @einsum (α,β,μ,ν) -> ∂Γ[μ,β,ν,α] + gi[σ,ϵ]*Γ[α,ν,σ]*Γ[ϵ,β,μ]
+#         Rt = @einsum (α,β,μ,ν) -> ∂Γ[μ,β,ν,α] + gi[σ,ϵ]*Γ[α,ν,σ]*Γ[ϵ,β,μ]
 
-        R  = @einsum (α,β,μ,ν) -> Rt[α,β,μ,ν] - Rt[α,β,ν,μ]  # Reimann Tensor (all lower indices)
+#         R  = @einsum (α,β,μ,ν) -> Rt[α,β,μ,ν] - Rt[α,β,ν,μ]  # Reimann Tensor (all lower indices)
 
-        I = @einsum gi[α,β]*gi[μ,ν]*gi[σ,ϵ]*gi[λ,δ]*R[α,μ,σ,λ]*R[β,ν,ϵ,δ]
+#         I = @einsum gi[α,β]*gi[μ,ν]*gi[σ,ϵ]*gi[λ,δ]*R[α,μ,σ,λ]*R[β,ν,ϵ,δ]
 
-        return I
+#         return I
 
-    else
+#     else
 
-        return 0.
+#         return 0.
 
-    end
+#     end
 
-end
+# end
 
 function Hawking_Mass_cell(Ub,rb,R,face)
-    # Calculates the Hawking Mass at one point on a surface
+    # Calculates the discrete Hawking Mass surface area element
 
     x,y,z = rb
 
@@ -441,7 +442,8 @@ function Area(Ub,rb,R,face)
     
 end
 
-@inline function SurfaceIntegral(f,U,ns,ds,ls,R)
+@inline function SurfaceIntegral(f,U,ns,ds,ls,R) 
+    # Performs discrete surface area integration
 
     nx,ny,nz = ns
     hx,hy,hz,_ = ds

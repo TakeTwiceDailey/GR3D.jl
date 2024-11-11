@@ -263,7 +263,7 @@ end
 
 end
 
-@inline function BoundaryConditions(Ub,H_,outer,rb,C_BC,fGW,k,ℓ,σ)
+@inline function BoundaryConditions(Ub,H_,outer,rb,C_BC,fGW1,fGW2,k,ℓ,σ)
 
     xb,yb,zb = rb
 
@@ -320,19 +320,19 @@ end
     #UmBC1 = ZeroST
     if outer
         UmBC1  = fUmBC(ℓ,xb,yb,zb)
-        UmBCGW = (1+fGW)*fUmBC(ℓ,xb,yb,zb)
+        UmBCGW = (1+fGW1)*fUmBC(ℓ,xb,yb,zb) #*
 
         # UmBC1  = Neumann(0.)
         # UmBCGW = Neumann(0.)
     else
-        # UmBC1  = Dirichlet(0.)
-        # UmBCGW = Dirichlet(0.)
+        #UmBC1  = Dirichlet(0.)
+        #UmBCGW = Dirichlet(0.)
 
         # UmBC1  = Neumann(0.)
         # UmBCGW = Neumann(0.)
 
         UmBC1  = fUmBC(ℓ,xb,yb,zb)
-        UmBCGW = fUmBC(ℓ,xb,yb,zb)
+        UmBCGW = (1+fGW2)*fUmBC(ℓ,xb,yb,zb)
     end
 
     # UmBC1  = Umfreeze(0.)
@@ -438,22 +438,37 @@ Base.@propagate_inbounds @inline function SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t
                 σz = 0.9*lx/2
                 r0 = -lx/2-σx
 
+                # σx = 1.
+                # σy = 0.9*2.5
+                # σz = 0.9*2.5
+                # r0 = 0.
+
                 rp = sqrt(((xb-(r0+t))/σx)^2+(yb/σy)^2+(zb/σz)^2)
 
-                model =  (outer&&(rp<1)) ? Amp*(rp-1)^4*(rp+1)^4 : 0.
+                model =  (outer&&(rp<1)) ? Amp*(rp-1)^4*(rp+1)^4 : 0. #outer&&
 
                 #C_BC = model*FourVector((0.,0.,0.,0.))
                 #C_BC = model*FourVector((1.,0.,0.,0.))
 
                 #UmBCGW = zero(StateTensor)
-                fGW = 130*model
+                fGW1 = 130*model
                 #fGW = 1.
+                
+                # μ0 = 0.
+                # σ0 = 2.5
+                # Amp2 = 2000.
+
+                # rc=sqrt(xb^2+yb^2+zb^2)
+
+                # model2 = (μ0-σ0)<rc<(μ0+σ0) ? (Amp2/σ0^8)*(rc-(μ0+t-σ0))^4*(rc-(μ0+t+σ0))^4 : 0.
+
+                fGW2 = 0 #model2*(3*zb^2/rc^2-1)
 
                 k,ℓ,σ = vectors(Ub,outer,ns,ri,rb) # Form boundary basis
 
                 C_BC = 0*model*FourVector((1.,0.,0.,0.))
 
-                UBC,cm = BoundaryConditions(Ub,Hb,outer,rb,C_BC,fGW,k,ℓ,σ)
+                UBC,cm = BoundaryConditions(Ub,Hb,outer,rb,C_BC,fGW1,fGW2,k,ℓ,σ)
 
                 if cm < 0
 
@@ -526,18 +541,34 @@ Base.@propagate_inbounds @inline function SAT(U,H,ns,ls,ds,nls,nrs,αls,αrs,r,t
                 σz = 0.9*lx/2
                 r0 = lx/2+σx
 
+                # σx = 1.
+                # σy = 0.9*2.5
+                # σz = 0.9*2.5
+                # r0 = 0.
+
                 rp = sqrt(((xb-(r0-t))/σx)^2+(yb/σy)^2+(zb/σz)^2)
 
-                model =  (outer&&(rp<1)) ? Amp*(rp-1)^4*(rp+1)^4 : 0.
+                model =  (outer&&(rp<1)) ? Amp*(rp-1)^4*(rp+1)^4 : 0. #outer&&
 
-                fGW =  130*model
+                fGW1 =  130*model
                 #fGW = 1.
+
+                
+                # μ0 = 0.
+                # σ0 = 2.5
+                # Amp2 = 2000.
+
+                # rc=sqrt(xb^2+yb^2+zb^2)
+
+                # model2 = (μ0-σ0)<rc<(μ0+σ0) ? (Amp2/σ0^8)*(rc-(μ0+t-σ0))^4*(rc-(μ0+t+σ0))^4 : 0.
+
+                fGW2 = 0. #model2*(3*zb^2/rc^2-1)
 
                 k,ℓ,σ = vectors(Ub,outer,ns,ri,rb) # Form boundary basis
 
                 C_BC = 0*model*FourVector((1.,0.,0.,0.))
 
-                UBC,cm = BoundaryConditions(Ub,Hb,outer,rb,C_BC,fGW,k,ℓ,σ)
+                UBC,cm = BoundaryConditions(Ub,Hb,outer,rb,C_BC,fGW1,fGW2,k,ℓ,σ)
 
                 if cm < 0
                     dxBC = UBC.dx

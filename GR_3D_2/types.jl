@@ -32,7 +32,7 @@ const Symmetric3rdOrderTensor = Tensor{Tuple{4,@Symmetry{4,4}},Data.Number,3,40}
 const Symmetric3rdOrderTensor3 = Tensor{Tuple{3,@Symmetry{3,3}},Data.Number,3,18}
 
 # Struct for main memory and Runge-Kutta algorithms that holds all state vector variables
-struct SavedFourVector <: FieldVector{5,StateTensor}
+struct StateVector <: FieldVector{5,StateTensor}
     g::StateTensor  # metric tensor
     dx::StateTensor # x-derivative
     dy::StateTensor # y-derivative
@@ -40,8 +40,8 @@ struct SavedFourVector <: FieldVector{5,StateTensor}
     P::StateTensor  # normal projection derivative
 end
 
-# Struct for main memory and Runge-Kutta algorithms that holds all state vector variables
-struct StateVector <: FieldVector{5,StateTensor}
+# Struct for storage that holds all state vector variables
+struct SavedFourVector <: FieldVector{5,StateTensor}
     g::StateTensor  # metric tensor
     dx::StateTensor # x-derivative
     dy::StateTensor # y-derivative

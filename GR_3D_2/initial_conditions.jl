@@ -1,17 +1,12 @@
-# Initial Conditions for Kerr-Schild spinning black hole
+# Initial Conditions for spherical Kerr-Schild spinning black hole
 
 #@@inline function (x,y,z,μ,ν)
 
 @inline function g_init(x,y,z) # Spinning black hole in Kerr-Schild form
-    # M = 0.5 # Mass of the hole
-    # a = 0.5*M # Spin of the hole (0<a<M)
     #s = 1.  # Makes the hole black (+1) or white (-1)
 
-    # M = mass
-    # a = spin
-
-    M = 1.
-    a = 0*M
+    M = 1.     # mass of black hole
+    a = 0.5*M  # Spin of black hole (factor less than one of mass.)
 
     r = sqrt(x^2+y^2+z^2)
 
@@ -19,9 +14,7 @@
 
     H = M*r^3/(r^4+a^2*z^2)
 
-    #return SymmetricSecondOrderTensor{4}((-1,0,0,0,1,0,0,1,0,1))
-
-    if x==y==0
+    if x==y==0  # Make sure smooth limit is reached at poles
 
         η1 = SymmetricSecondOrderTensor{4}((-1,0,0,0,1+a^2/z^2,0,0,1+a^2/z^2,0,1))
 
@@ -86,7 +79,7 @@ end
 # Gauge functions and derivatives (freely specifyable)
 #@inline fH_(x,y,z,μ) = (0.,0.,0.,0.)[μ] # lower index
 
-@inline function fH_(x,y,z) 
+@inline function fH_(x,y,z) # function for the bulk gauge specification
 
     g = g_init(x,y,z)
 
@@ -108,14 +101,6 @@ end
 
     return SVector{4}(H_.data...)
 
-    #return FourVector((0,0,0,0))
-
-    # M = 10.0
-
-    # r = sqrt(x^2+y^2+z^2)
-
-    # return (2*M/r^2,2*M*x/r^3,2*M*y/r^3,2*M*z/r^3)[μ]
-
 end
 
 # @inline ∂tH(x,y,z) = 0. # FourVector((0,0,0,0))
@@ -135,7 +120,7 @@ end
 #     imag(fH_(x,y,z+ϵ*im))/ϵ
 # end
 
-@inbounds @inline function fUmBC(ℓ::FourVector,x::Data.Number,y::Data.Number,z::Data.Number) 
+@inbounds @inline function fUmBC(ℓ::FourVector,x::Data.Number,y::Data.Number,z::Data.Number)     # function for selecting the initial U-
     StateTensor(ℓ[1]*∂tg_init(x,y,z) + ℓ[2]*∂xgalt(x,y,z) + ℓ[3]*∂ygalt(x,y,z) + ℓ[4]*∂zgalt(x,y,z))
 end
 
@@ -147,7 +132,7 @@ end
 # @inline ∂yH(x,y,z) = ForwardDiff.derivative(y -> fH_(x,y,z), y)
 # @inline ∂zH(x,y,z) = ForwardDiff.derivative(z -> fH_(x,y,z), z)
 
-@inline function f∂H_(x,y,z) 
+@inline function f∂H_(x,y,z)  # Calculate derivatives of Gauge functions.
 
     ∂tH = (0,0,0,0)
     # ∂xHs = ForwardDiff.derivative(x -> fH_(x,y,z), x).data
