@@ -11,7 +11,8 @@ This applies several novel frameworks
 The setup is a cubical domain with a spherical hole cut out in the center, inside which is placed a black hole.
 Gravitational waves are then injected during the evolution, perturbing the black hole.
 
-To run this, make sure you have started Julia with the desired amount of threads and have installed all necessary packages.
+To run this, make sure you have started Julia with the desired amount of threads and have installed all necessary packages. **Use Tensorial.jl version previous to v0.17.0 as something has changed to trash performance. Working on figuring out why this happens.**
+
 Then run `include("src/main.jl")`, and finally run `GR3D.main()`. 
 
 Check out `src/main.jl` for various settings involving spacetime domain size, inner boundary radius, etc.
