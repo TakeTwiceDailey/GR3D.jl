@@ -1,7 +1,7 @@
 # GR3D.jl
 Numerical Relativity simulations using `ParallelStencil.jl` and embedded boundary finite differencing operators to allow for arbitrary 3D domains.
 
-This Julia program was used to produce the results published here: https://arxiv.org/abs/2409.17970
+This Julia program was used to produce the results published here: https://iopscience.iop.org/article/10.1088/1361-6382/ad9701
 
 This applies several novel frameworks
   - Demonstrates embedded boundary SBP finite differencing stencils
